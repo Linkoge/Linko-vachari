@@ -3,6 +3,7 @@ import type { Draft } from '../server/types';
 import { readCache, writeCache, clearCache } from './cache';
 import { BrowserPanel } from './BrowserPanel';
 import { AgentWindow } from './AgentWindow';
+import { ListingRecords } from './ListingRecords';
 type IconName = 'spark' | 'plus' | 'photo' | 'arrow' | 'check' | 'shield' | 'download' | 'close' | 'grid' | 'gear' | 'link' | 'leaf';
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -153,6 +154,11 @@ export function App() {
           </div>}
           <div className="reassurance"><Icon name="shield" size={17}/><span>You're in control. Nothing is published until you ask.</span></div>
         </section><aside className="preview-column"><div className="preview-heading"><span>YOUR LISTING, COMING TO LIFE</span><span className="live-dot"/></div><div className="listing-preview"><div className="preview-image">{draft?.coverId ? <img src={imageUrl(draft.coverId)} alt="Selected cover preview"/> : <div className="empty-preview"><span className="empty-orbit"/><span className="empty-photo"><Icon name="photo" size={54}/></span><span className="empty-spark"><Icon name="spark" size={29}/></span><p>A fresh start for<br/>something good.</p></div>}<span className="preview-tag">MyMarket preview</span>{draft?.condition && <span className="condition-tag">{draft.condition}</span>}</div><div className="preview-content"><div className="preview-category">{draft?.category.at(-1) || 'A category that fits'}</div><h3>{draft?.title || draft?.model || 'Your next great listing'}</h3><div className={'preview-price ' + (!draft?.price ? 'placeholder-price' : '')}>{draft?.price ? Number(draft.price).toLocaleString() : '—'} <span>{draft?.currency === 'USD' ? '$' : '₾'}</span></div><p>{draft?.description || 'Add a few details and give buyers a reason to love it.'}</p><div className="preview-meta"><span>{draft?.location || 'Your location'}</span><span>{draft?.photos.length || 0} photos</span></div></div></div><div className="assistant-card"><span className="assistant-icon"><Icon name="spark" size={21}/></span><div><h3>A helpful pair of hands</h3><p>We find similar items, match the category, and check the live form. You make the final call.</p></div></div><div className="save-status"><span className={dirty ? 'unsaved-dot' : 'saved-dot'}/>{dirty ? online ? 'Edits saved on this device' : 'Saved locally · sync when online' : 'Draft saved in your workspace'}<button disabled={working || locked} onClick={async () => { setWorking(true); try { await save(); } catch (e) { setError((e as Error).message); } finally { setWorking(false); } }}>{dirty ? 'Save' : 'Saved'}</button></div></aside></div>
+        <ListingRecords online={online} disabled={working || running} onOpenDraft={async id => {
+          if (dirty && !locked) await save();
+          const next = await api<Draft>('/drafts/' + id);
+          cachedPhotos.current = []; setDraft(next); setDirty(false); setStep(3); setError('');
+        }}/>
         <footer className="page-footer"><span>Made for less scrolling and more selling.</span><span>Linko × MyMarket <span className="footer-spark">✦</span></span></footer>
       </main>
     </div>

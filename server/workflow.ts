@@ -10,6 +10,7 @@ import { Store } from './store';
 import { LoginAgent } from './agent';
 import { CredentialVault } from './credentials';
 import { Draft, WorkflowError } from './types';
+import { ListingArchive, ListingMonitor } from './listings';
 const question = z.object({ key: z.string(), label: z.string(), options: z.array(z.string()) });
 const decisionSchema = z.object({ action: z.enum(['click', 'fill', 'select', 'search_enter', 'upload', 'wait', 'done', 'blocked']), target: z.string(), source: z.string(), value: z.string(), questions: z.array(question), reason: z.string() });
 type Decision = z.infer<typeof decisionSchema>;
@@ -18,7 +19,8 @@ export class Workflow {
   browser = new MarketplaceBrowser(); busy = false; manualActive = false;
   prepared?: { id: string; revision: number; hash: string; button: string; at: number };
   auth: LoginAgent;
-  constructor(public store: Store, public brain: typeof ask = ask, vault = new CredentialVault()) { this.auth = new LoginAgent(this, vault); }
+  archive: ListingArchive;
+  constructor(public store: Store, public brain: typeof ask = ask, vault = new CredentialVault()) { this.auth = new LoginAgent(this, vault); this.archive = new ListingArchive(store); }
   async run(id: string, operation: 'analyze' | 'prepare' | 'publish') {
     if (this.busy || this.manualActive) throw new WorkflowError('BUSY', 'The marketplace browser is in use. Finish manual login or wait for the current listing.');
     this.busy = true;
@@ -179,6 +181,14 @@ export class Workflow {
     // Review entries must be actually present in the observation, not model-invented.
     d.fields = validation.fields.filter(f => !/phone|email|password|ტელეფონ|ელ.?ფოსტ|პაროლ/i.test(f.label) && (result.snapshot.text.includes(f.value) || result.snapshot.elements.some(e => e.value === f.value)));
     if (!d.fields.length) throw new WorkflowError('VERIFY', 'No verifiable field review was available. Inspect the current form.');
+    // Retain every observed non-private control, including optional/default selections, for the exact listing recipe.
+    for (const e of result.snapshot.elements) {
+      const label = e.group ? `${e.group}: ${e.label}` : e.label;
+      if (!['input', 'textarea', 'select'].includes(e.tag) && e.role !== 'combobox') continue;
+      if (['file', 'hidden', 'password', 'submit', 'button'].includes(e.type) || /phone|email|password|ტელეფონ|ელ.?ფოსტ|პაროლ/i.test(label)) continue;
+      const value = ['checkbox', 'radio'].includes(e.type) ? String(e.checked) : e.value;
+      if (!d.fields.some(f => f.label === label && f.value === value)) d.fields.push({ label, value, source: 'observed live control' });
+    }
     d.questions = []; d.state = 'ready'; d.preparedRevision = d.revision; d.preparedAt = new Date().toISOString();
     this.prepared = { id: d.id, revision: d.revision, hash: this.formHash(result.snapshot), button: buttons[0].label, at: Date.now() };
     this.store.event(d, 'The live form is prepared. Review the actual field values below. Publishing requires your explicit click.');
@@ -193,6 +203,10 @@ export class Workflow {
     if (targets.length !== 1) throw new WorkflowError('STALE', 'The publishing control changed. Prepare it again.');
     const audit = await this.brain(z.object({ matches: z.boolean() }), 'Perform the final pre-submit audit. Does the live form still match ALL explicitly reviewed draft facts, selected full category, photo count and first cover? Fail for unknown defaults, missing fields, mismatches, fees or paid promotions. Never infer hidden values.', JSON.stringify({ draft: { title: d.title, description: d.description, price: d.price, currency: d.currency, model: d.model, condition: d.condition, location: d.location, category: d.category, facts: d.facts, photoCount: d.photos.length }, reviewedFields: d.fields, page: snapshot }));
     if (!audit.matches) throw new WorkflowError('STALE', 'The live form no longer matches your reviewed details. Prepare it again before publishing.');
+    if (d.relistOf && await new ListingMonitor(this).inspect(this.archive.get(d.relistOf)) !== 'missing') {
+      throw new WorkflowError('RELIST', 'The original listing is no longer confirmed missing. Inspect MyMarket before publishing a replacement.');
+    }
+    this.archive.snapshot(d); // A writable Markdown recipe is mandatory before the irreversible submit.
     const fp = this.store.claim(d); d.state = 'publishing'; this.store.event(d, 'Submitting once to MyMarket. The app will not repeat this publishing action.');
     // Durable claim exists before the one irreversible click, even if the process crashes.
     try {
@@ -209,6 +223,10 @@ export class Workflow {
       d.state = 'published'; this.store.finish(fp, 'published', d.receipt); this.store.event(d, 'Published and verified on MyMarket. Your receipt is saved locally.');
     } catch {
       d.state = 'unknown'; this.store.finish(fp, 'unknown'); this.store.event(d, 'MyMarket may have received the listing, but success could not be verified. Check your account manually. This item is locked against automatic reposting.');
+    }
+    if (d.state === 'published') {
+      // Receipt state is already durable. A disk/archive failure must not turn success into an uncertain submit.
+      try { this.archive.published(d); } catch { this.store.event(d, 'Published successfully. The Markdown receipt update needs a retry when storage is available.'); }
     }
   }
 }

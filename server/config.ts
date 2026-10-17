@@ -14,6 +14,7 @@ export const config = {
   panelAuth: process.env.LINKO_PANEL_AUTH === 'false' ? false : process.env.LINKO_PANEL_AUTH === 'true' ? true : undefined,
   releaseId: process.env.LINKO_RELEASE_ID || 'development',
   headless: process.env.HEADLESS === 'true', publish: process.env.ALLOW_PUBLISH === 'true',
+  autoRelist: process.env.LINKO_AUTO_RELIST === 'true',
 };
 if (!['127.0.0.1', 'localhost', '::1'].includes(config.host)) {
   throw new Error('The application must bind loopback. Remote access uses a trusted Tailscale Serve HTTPS proxy.');

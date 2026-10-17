@@ -50,7 +50,19 @@ The private browser uses a dedicated display and protected same-origin frame/inp
 
 Automation uses current DOM labels, roles, values, options and transient element handles. Codex cannot choose arbitrary selectors, coordinate clicks, credentials, payments or the final publish action. Human clicks in the private login browser are separate from semantic automation. Bounded retries re-observe the page; final publication is never automatically retried. A fresh revision, browser session, field/photo hash and final semantic audit must pass.
 
-A durable SQLite claim prevents repeat publication of identical content/photos across draft IDs. A success receipt requires an observed confirmation and a public listing page with matching title and price. An uncertain outcome becomes **unknown**, including a process interruption; inspect the account manually before any further action. There is no automated unlock or repost endpoint.
+A durable SQLite claim prevents repeat publication of identical content/photos across draft IDs. A success receipt requires an observed confirmation and a public listing page with matching title and price. An uncertain outcome becomes **unknown**, including a process interruption; inspect the account manually before any further action. Uncertain attempts are never automatically unlocked or retried.
+
+### Saved records and deleted-listing recovery
+
+Before every final submission, the app saves a private Markdown recipe to `LINKO_DATA_DIR/listings/<draft-id>.md` (default `.private/listings/`). It includes the complete category/section path, exact title and description, price/currency, supplied facts, observed non-private form fields (including optional/default controls), and photo filenames in cover-first upload order. A verified receipt and subsequent monitoring results update that file. SQLite retains the immutable recipe and replacement chain. Keep the **entire private data directory**, including `workspace.sqlite` and `photos/`, in backups: the Markdown alone does not contain the image bytes. Credentials, cookies and account/contact form controls are excluded. Older successful listings are backfilled from their saved draft/review when the server starts; their records can only include fields the older version retained.
+
+The server checks verified listings every **three hours**, including overdue checks after restart. It waits for listing work, manual browser use and an unexpired form review to finish. The **Saved listings** panel provides Markdown downloads, the latest status, original/replacement drafts and pause/resume controls. Records remain available through the private API with the same access and no-cache rules as drafts. Monitoring continues while the server runs, even with the panel closed.
+
+Automatic replacement requires **both** `ALLOW_PUBLISH=true` and `LINKO_AUTO_RELIST=true` in the operator's private runtime environment. The latter defaults to false. Each successfully published item starts with monitoring enabled. **Pause monitoring before marking an item sold, removing it intentionally, or retiring it**; a public 404 cannot distinguish those actions from a marketplace deletion. Resume resets the deletion evidence. This change implements the capability; it does not enable or deploy it on the live host.
+
+Recovery requires two HTTP **404/410** responses for the exact saved public URL, separated by at least **ten minutes**. Timeouts, redirects, login pages, browser challenges, server errors, changed content and ambiguous 200 responses reset the evidence and never trigger publication. Some MyMarket removals may use a 200 error shell; those are reported as inconclusive until their actual behavior can be verified. The monitor then restores the saved text, facts, category and photos, checks the current live form, verifies the old URL is still missing in a separate tab, and performs one guarded submit. Existing field, fee, photo and publication audits still apply. It neither searches for comparable products again nor invents missing fields. The replacement gets its own record and future checks; the old record is retired.
+
+Changed form requirements, sign-in issues, missing photos, interrupted preparation and uncertain submissions stop automatic recovery for that item and show **attention**. Open its replacement draft and inspect the MyMarket account. A blocked draft can be corrected and explicitly prepared/published after review; an unknown publishing attempt remains locked. Neither restarting the server nor resuming monitoring retries such an attempt. Fixture tests cover confirmed deletion through a verified replacement; no live listing was published or removed for this feature.
 
 ## Privacy, offline use and limitations
 
@@ -70,6 +82,7 @@ Cloudflare: the earlier 403 came from automation fingerprints (the default `Head
 
 ```sh
 corepack pnpm build
+corepack pnpm test
 corepack pnpm exec tsx --test tests/access.test.ts tests/config.test.ts tests/codex.test.ts tests/manual.test.ts tests/secret-files.test.ts
 corepack pnpm test:ui
 corepack pnpm security:check
@@ -78,6 +91,6 @@ corepack pnpm audit --prod
 python -m pytest -q -m smoke
 ```
 
-Results: backend tests including the agent login/OTP/session-reuse/credential-handling suite (`tests/agent.test.ts`), 4 production UI tests, build/typecheck, private-data checks, clean production dependency audit, and the isolated smoke check passed. Fixture tests fulfill simulated marketplace requests locally; no real test listing was published. The native Codex probe and private-browser probe are separately identified from fixture verification. Do not repeat the full backend suite as part of this handoff; the manager's deployment validation owns its final run.
+The permanent suites include backend login/session, listing archive/deletion/replacement/uncertain-outcome tests and a saved-listings UI test alongside the existing editor, setup and assistant checks. Fixture tests fulfill simulated marketplace requests locally; no real test listing is published. Use a disposable `LINKO_DATA_DIR` for Node/UI tests. The native Codex probe and private-browser probe are separately identified from fixture verification. See the execution report for dated results and live limits.
 
 The [execution report](docs/EXECUTION_REPORT.md) retains changed files, exact checks, blockers, icon provenance, release preparation and activation steps. The prepared artifact is local and has not been deployed or pushed.

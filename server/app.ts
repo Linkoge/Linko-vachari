@@ -12,10 +12,12 @@ import { WorkflowError } from './types';
 import { AccessBoundary } from './access';
 import { ManualBrowser } from './manual-browser';
 import { codexStatus } from './codex';
+import { ListingMonitor } from './listings';
 const patchSchema = z.object({ revision: z.number().int(), title: z.string().max(120), description: z.string().max(6000), price: z.string().regex(/^(?:\d{0,8})(?:\.\d{0,2})?$/), currency: z.enum(['GEL', 'USD']), model: z.string().max(200), condition: z.string().max(100), location: z.string().max(200), category: z.array(z.string().max(120)).max(8), facts: z.record(z.string().max(100), z.string().max(500)), coverId: z.string().max(50) });
 export function createApp(store = new Store(), workflow = new Workflow(store), access = new AccessBoundary()) {
   const app = express(); app.disable('x-powered-by');
   const manual = new ManualBrowser(workflow);
+  const monitor = new ListingMonitor(workflow);
   app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'blob:', 'data:'], connectSrc: ["'self'", ...(!access.origin ? ['ws://127.0.0.1:*', 'ws://localhost:*'] : [])], objectSrc: ["'none'"], upgradeInsecureRequests: null } }, strictTransportSecurity: access.origin ? { maxAge: 15552000, includeSubDomains: false } : false }));
   app.use(access.middleware);
   app.use(express.json({ limit: '32kb' }));
@@ -43,6 +45,20 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   app.post('/api/browser/control', async (req, res) => { await manual.control(access.session(req), req.body); res.json({ accepted: true }); });
   app.post('/api/browser/finish', async (req, res) => { await manual.stop(access.session(req)); res.json({ active: false, loginVerified: false }); });
   app.post('/api/drafts', (_req, res) => res.status(201).json(store.create()));
+  app.get('/api/listings', (_req, res) => res.json({ autoRelistEnabled: config.autoRelist && config.publish, records: workflow.archive.all().map(({ recipe, ...r }) => ({ ...r, title: recipe.title })) }));
+  app.post('/api/listings/check', (_req, res) => {
+    if (workflow.busy || workflow.manualActive || workflow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review before checking listings.');
+    void monitor.check().catch(() => {}); res.status(202).json({ accepted: true });
+  });
+  app.patch('/api/listings/:id', (req, res) => {
+    if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the listing check to finish before changing monitoring.');
+    const { enabled } = z.object({ enabled: z.boolean() }).strict().parse(req.body);
+    res.json(workflow.archive.pause(req.params.id, enabled));
+  });
+  app.get('/api/listings/:id/record', (req, res) => {
+    const r = workflow.archive.get(req.params.id);
+    res.type('text/markdown').attachment(r.id + '.md').sendFile(r.id + '.md', { root: store.archiveDir });
+  });
   app.get('/api/drafts/:id', (req, res) => res.json(store.get(req.params.id)));
   const editable = (id: string) => {
     const d = store.get(id);
@@ -79,7 +95,9 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     d.photos = d.photos.filter(photo => photo.id !== p.id);
     if (d.coverId === p.id) d.coverId = d.photos[0]?.id || '';
     d.revision++; d.state = 'draft'; delete d.preparedRevision; workflow.prepared = undefined;
-    store.save(d); unlinkSync(join(privateDir, 'photos', p.id + '.jpg')); res.json(d);
+    store.save(d);
+    if (!store.photoReferenced(p.id)) unlinkSync(join(privateDir, 'photos', p.id + '.jpg'));
+    res.json(d);
   });
   app.post('/api/drafts/:id/:operation', (req, res) => {
     const operation = req.params.operation;
@@ -99,5 +117,5 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     // Never serialize provider, browser, request or database errors; they may contain secrets.
     res.status(status).json({ message: err instanceof WorkflowError ? err.message : status === 400 ? 'Check your input and photo size, then try again.' : 'The local server could not complete this action. Your saved draft is safe.' });
   });
-  return { app, store, workflow, access, manual };
+  return { app, store, workflow, access, manual, monitor };
 }

@@ -8,6 +8,7 @@ import { savePhoto } from '../server/photos';
 import { config } from '../server/config';
 import { ask } from '../server/codex';
 import { MarketplaceBrowser } from '../server/browser';
+import { ListingMonitor, MISSING_RECHECK } from '../server/listings';
 test('semantic snapshots keep private field presence without values and recognize the live challenge', async () => {
   const browser = await chromium.launch(); const page = await browser.newPage(); const adapter = new MarketplaceBrowser(); adapter.page = page;
   try {
@@ -21,7 +22,7 @@ test('semantic snapshots keep private field presence without values and recogniz
 });
 test('connected semantic workflow: comparables, new live required field, review, guarded submit, durable receipt, stale form and unknown-response recovery', { timeout: 120000 }, async () => {
   const browser = await chromium.launch(); const context = await browser.newContext(); const page = await context.newPage();
-  const store = new Store(':memory:'); let submits = 0, uncertain = false;
+  const store = new Store(':memory:'); let submits = 0, uncertain = false, deleted = false;
   await context.route('https://mymarket.ge/**', async route => {
     const path = new URL(route.request().url()).pathname;
     let html = '';
@@ -29,8 +30,9 @@ test('connected semantic workflow: comparables, new live required field, review,
     if (path === '/search/') html = '<h1>Results</h1><a href="/pr/111/lamp">Studio lamp</a><a href="/pr/112/lamp">Another lamp</a>';
     if (path.startsWith('/pr/111') || path.startsWith('/pr/112')) html = '<nav>Home &gt; Lighting &gt; Studio lamps</nav><h1>Studio lamp</h1><p>125 GEL</p>';
     if (path === '/create') html = `<h1>Create listing</h1><label>Category<select><option value="">Choose</option><option>Studio lamps</option></select></label><p>Home &gt; Lighting &gt; Studio lamps</p><label>Title<input required></label><label>Description<textarea required></textarea></label><label>Price<input required type="number"></label><label>Currency<select><option>GEL</option><option>USD</option></select></label><label>Power source<select required><option value="">Choose</option><option>Mains</option><option>Battery</option></select></label><label>Photos<input id="photos" type="file" accept="image/jpeg" multiple></label><div id="previews"></div><script>document.getElementById('photos').addEventListener('change',function(){const picked=Array.from(this.files);if(picked.length>1)picked.reverse();picked.forEach(function(f){const img=document.createElement('img');img.alt=f.name;img.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBmsAAAAASUVORK5CYII=';document.getElementById('previews').append(img)})})</script><button onclick="fetch('/submit',{method:'POST'}).then(r=>r.text()).then(t=>document.body.innerHTML=t)">Publish listing</button>`;
-    if (path === '/submit') { submits++; html = uncertain ? '<h1>Thanks</h1>' : '<h1>Listing published successfully</h1><a href="/pr/900/lamp">View item</a>'; }
-    if (path.startsWith('/pr/900')) html = '<h1>Studio lamp with stand</h1><p>125 GEL</p>';
+    if (path === '/submit') { submits++; html = uncertain ? '<h1>Thanks</h1>' : `<h1>Listing published successfully</h1><a href="/pr/${899 + submits}/lamp">View item</a>`; }
+    if (path.startsWith('/pr/900') && deleted) { await route.fulfill({ status: 404, contentType: 'text/html', body: 'Listing removed' }); return; }
+    if (/^\/pr\/90\d/.test(path)) html = '<h1>Studio lamp with stand</h1><p>125 GEL</p>';
     await route.fulfill({ status: 200, contentType: 'text/html', body: html });
   });
   const brain: typeof ask = (async (_schema: unknown, instructions: string, input: string) => {
@@ -42,7 +44,7 @@ test('connected semantic workflow: comparables, new live required field, review,
     if (instructions.startsWith('Compare only')) return { equivalent: true };
     if (instructions.startsWith('Audit the final')) return { categoryMatches: true, fieldsMatch: true, photosPresent: v.page.images.length === 2, questions: [], fields: v.page.elements.filter((e: any) => ['Title', 'Description', 'Price', 'Power source'].includes(e.label)).map((e: any) => ({ label: e.label, value: e.value, source: e.label })) };
     if (instructions.startsWith('Perform the final')) return { matches: true };
-    if (instructions.startsWith('Check explicit')) return { succeeded: !uncertain, url: uncertain ? '' : 'https://mymarket.ge/pr/900/lamp', confirmation: uncertain ? '' : 'Listing published successfully' };
+    if (instructions.startsWith('Check explicit')) return { succeeded: !uncertain, url: uncertain ? '' : `https://mymarket.ge/pr/${899 + submits}/lamp`, confirmation: uncertain ? '' : 'Listing published successfully' };
     const elements = v.page.elements as any[];
     const decision = (action: string, label = '', source = '', value = '') => { return { action, target: elements.find(e => e.label === label)?.id || '', source, value, questions: [], reason: 'Fixture semantic decision' }; };
     if (v.task.startsWith('Search')) {
@@ -61,7 +63,7 @@ test('connected semantic workflow: comparables, new live required field, review,
   const flow = new Workflow(store, brain); flow.browser.page = page; flow.browser.context = context;
   const draft = store.create(); const photos = [await savePhoto(readFileSync('public/icons/icon-512.png')), await savePhoto(readFileSync('public/icons/icon-192.png'))];
   Object.assign(draft, { description: 'A used studio lamp with original stand.', price: '125', photos, coverId: photos[1].id }); store.save(draft);
-  const previous = config.publish; config.publish = true;
+  const previous = config.publish, previousRelist = config.autoRelist; config.publish = true;
   try {
     await flow.run(draft.id, 'analyze'); const analyzed = store.get(draft.id); assert.equal(analyzed.state, 'review', analyzed.message); assert.equal(analyzed.coverId, photos[1].id); assert.equal(analyzed.comparables.length, 2); assert.deepEqual(analyzed.category, ['Home', 'Lighting', 'Studio lamps']);
     await flow.run(draft.id, 'prepare'); const needs = store.get(draft.id); assert.equal(needs.state, 'needs_input', needs.message); assert.equal(needs.questions[0].key, 'Power source'); assert.equal(submits, 0);
@@ -72,9 +74,17 @@ test('connected semantic workflow: comparables, new live required field, review,
     await page.getByLabel('Price', { exact: true }).fill('999'); await flow.run(draft.id, 'publish'); assert.equal(submits, 0); assert.equal(store.get(draft.id).state, 'blocked');
     await flow.run(draft.id, 'prepare'); assert.equal(store.get(draft.id).state, 'ready'); await flow.run(draft.id, 'publish');
     const published = store.get(draft.id); assert.equal(submits, 1); assert.equal(published.state, 'published'); assert.equal(published.receipt?.url, 'https://mymarket.ge/pr/900/lamp');
+    const record = flow.archive.get(draft.id); assert.ok(readFileSync(store.archiveDir + '/' + draft.id + '.md', 'utf8').includes('Power source'));
+    config.autoRelist = true; deleted = true; record.nextCheckAt = 0; flow.archive.write(record); flow.prepared = undefined;
+    const monitor = new ListingMonitor(flow), now = Date.now();
+    await monitor.check(now); assert.equal(submits, 1);
+    await monitor.check(now + MISSING_RECHECK); assert.equal(submits, 2);
+    const replaced = flow.archive.get(draft.id); assert.equal(replaced.status, 'replaced', replaced.message);
+    const restored = store.get(replaced.replacementId!); assert.equal(restored.state, 'published'); assert.equal(restored.receipt?.url, 'https://mymarket.ge/pr/901/lamp');
+    assert.deepEqual(restored.photos, published.photos); assert.equal(restored.coverId, published.coverId); assert.deepEqual(restored.facts, published.facts);
     const second = store.create(); Object.assign(second, { ...published, id: second.id, state: 'review', title: 'Another lamp', revision: 0 }); store.save(second);
     // The fixture model fills the explicitly supplied second title; no success is inferred from a generic response.
-    uncertain = true; await flow.run(second.id, 'prepare'); assert.equal(store.get(second.id).state, 'ready'); await flow.run(second.id, 'publish'); assert.equal(store.get(second.id).state, 'unknown'); assert.equal(submits, 2);
-    const retry = store.get(second.id); retry.state = 'review'; store.save(retry); await flow.run(second.id, 'prepare'); await flow.run(second.id, 'publish'); assert.equal(submits, 2); assert.match(store.get(second.id).message, /already has a publishing attempt/);
-  } finally { config.publish = previous; await browser.close(); store.db.close(); }
+    uncertain = true; await flow.run(second.id, 'prepare'); assert.equal(store.get(second.id).state, 'ready'); await flow.run(second.id, 'publish'); assert.equal(store.get(second.id).state, 'unknown'); assert.equal(submits, 3);
+    const retry = store.get(second.id); retry.state = 'review'; store.save(retry); await flow.run(second.id, 'prepare'); await flow.run(second.id, 'publish'); assert.equal(submits, 3); assert.match(store.get(second.id).message, /already has a publishing attempt/);
+  } finally { config.publish = previous; config.autoRelist = previousRelist; await browser.close(); store.db.close(); }
 });

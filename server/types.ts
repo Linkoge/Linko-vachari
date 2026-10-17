@@ -10,6 +10,7 @@ export interface Draft {
   category: string[]; comparables: Comparable[]; questions: Question[];
   fields: FieldReview[]; message: string; events: { at: string; message: string }[];
   preparedRevision?: number; preparedAt?: string; receipt?: { url: string; at: string; evidence: string };
+  relistOf?: string;
 }
 export class WorkflowError extends Error {
   constructor(public code: string, message: string) { super(message); }

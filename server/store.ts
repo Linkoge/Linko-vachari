@@ -6,10 +6,11 @@ import { privateDir } from './config';
 import { Draft, WorkflowError } from './types';
 export class Store {
   db: DatabaseSync;
-  constructor(path = join(privateDir, 'workspace.sqlite')) {
+  constructor(path = join(privateDir, 'workspace.sqlite'), public archiveDir = join(privateDir, 'listings')) {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, data TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS attempts(fingerprint TEXT PRIMARY KEY, draft TEXT NOT NULL, state TEXT NOT NULL, receipt TEXT);`);
+      CREATE TABLE IF NOT EXISTS attempts(fingerprint TEXT PRIMARY KEY, draft TEXT NOT NULL, state TEXT NOT NULL, receipt TEXT);
+      CREATE TABLE IF NOT EXISTS listing_records(id TEXT PRIMARY KEY, data TEXT NOT NULL);`);
   }
   create() {
     const d: Draft = { id: randomUUID(), revision: 0, state: 'draft', title: '', description: '', price: '', currency: 'GEL', model: '', condition: '', location: '', facts: {}, photos: [], coverId: '', category: [], comparables: [], questions: [], fields: [], message: 'Add your photos and a few details to begin.', events: [] };
@@ -23,6 +24,12 @@ export class Store {
     return d;
   }
   save(d: Draft) { this.db.prepare('INSERT OR REPLACE INTO drafts VALUES (?,?)').run(d.id, JSON.stringify(d)); }
+  photoReferenced(id: string) {
+    const drafts = this.db.prepare('SELECT data FROM drafts').all() as { data: string }[];
+    const records = this.db.prepare('SELECT data FROM listing_records').all() as { data: string }[];
+    return drafts.some(r => (JSON.parse(r.data) as Draft).photos.some(p => p.id === id)) ||
+      records.some(r => (JSON.parse(r.data).recipe as Draft).photos.some(p => p.id === id));
+  }
   event(d: Draft, message: string) {
     d.message = message; d.events.push({ at: new Date().toISOString(), message });
     d.events = d.events.slice(-80); this.save(d);
@@ -33,7 +40,15 @@ export class Store {
     return createHash('sha256').update(JSON.stringify({ title: d.title.trim(), description: d.description.trim(), price: Number(d.price), currency: d.currency, model: d.model, photos })).digest('hex');
   }
   claim(d: Draft) {
-    const fp = this.fingerprint(d);
+    let fp = this.fingerprint(d);
+    if (d.relistOf) {
+      const row = this.db.prepare('SELECT data FROM listing_records WHERE id=?').get(d.relistOf) as { data: string } | undefined;
+      const record = row && JSON.parse(row.data);
+      if (!record || !record.enabled || !['relisting', 'attention'].includes(record.status) || record.replacementId !== d.id || record.missingCount < 2 || record.fingerprint !== fp) {
+        throw new WorkflowError('RELIST', 'Re-listing requires a saved recipe and two confirmed missing checks.');
+      }
+      fp += ':replacement:' + d.relistOf;
+    }
     try { this.db.prepare('INSERT INTO attempts VALUES (?,?,?,NULL)').run(fp, d.id, 'publishing'); }
     catch { throw new WorkflowError('DUPLICATE', 'This item already has a publishing attempt. Check your MyMarket account before doing anything else. Automatic reposting is disabled.'); }
     return fp;
