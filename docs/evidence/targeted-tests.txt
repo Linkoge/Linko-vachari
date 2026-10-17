@@ -1,0 +1,38 @@
+TAP version 13
+# (node:3408144) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: tailnet host/identity boundary, protected panel login, CSRF, cookies, identity binding, expiry, logout and fail-closed setup
+ok 1 - tailnet host/identity boundary, protected panel login, CSRF, cookies, identity binding, expiry, logout and fail-closed setup
+  ---
+  duration_ms: 360.70341
+  type: 'test'
+  ...
+# Subtest: panel password guessing is bounded and identity/session information never enters responses
+ok 2 - panel password guessing is bounded and identity/session information never enters responses
+  ---
+  duration_ms: 377.054791
+  type: 'test'
+  ...
+# Subtest: supported Codex CLI transport validates structured outputs, withholds secret environment and removes transient results
+ok 3 - supported Codex CLI transport validates structured outputs, withholds secret environment and removes transient results
+  ---
+  duration_ms: 1368.605519
+  type: 'test'
+  ...
+# (node:3408146) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: owner-controlled browser input/frame uses the automation context, enforces leases and serializes with listing work
+ok 4 - owner-controlled browser input/frame uses the automation context, enforces leases and serializes with listing work
+  ---
+  duration_ms: 4312.745313
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6566.54986

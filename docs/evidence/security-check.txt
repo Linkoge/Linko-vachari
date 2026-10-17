@@ -1,0 +1,14 @@
+
+> linko-mymarketer@0.2.0 security:check /home/codex/projects/linko-mymarketer
+> tsx scripts/security-check.ts
+
+{
+  "passed": true,
+  "checkedFiles": 79,
+  "historicalCommits": 1,
+  "historicalBlobs": 51,
+  "ignoreCases": 11,
+  "clientBundle": "No server implementation, provider-key configuration or configured project secret detected",
+  "nativeCodexAuthStoreInspected": false,
+  "limitations": "Pattern scan and configured-project-secret checks; original owner credentials unavailable. Native credentials are owned by Codex and were never inspected."
+}

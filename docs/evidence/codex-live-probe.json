@@ -1,0 +1,11 @@
+{
+  "checkedAt": "2026-10-14T06:56:28.286Z",
+  "available": true,
+  "chatgptSignedIn": true,
+  "transport": "official codex exec",
+  "auth": "Codex-managed ChatGPT sign-in",
+  "structuredDecisionVerified": true,
+  "photoInputs": 0,
+  "marketplaceActions": 0,
+  "tokensReadOrExported": false
+}

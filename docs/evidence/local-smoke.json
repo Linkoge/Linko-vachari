@@ -1,0 +1,17 @@
+{
+  "checkedAt": "2026-10-15T09:45:27.366243+00:00",
+  "passed": true,
+  "kind": "isolated production HTTP smoke",
+  "shell": 200,
+  "standaloneManifest": true,
+  "pngIcons": 3,
+  "hashedAssetsPrecached": true,
+  "privateApiNoStore": true,
+  "crossOriginWriteDenied": true,
+  "draftCreation": 201,
+  "publishingEnabled": false,
+  "modelCalls": 0,
+  "marketplaceRequests": 0,
+  "temporaryRuntime": true,
+  "deploymentPerformed": false
+}

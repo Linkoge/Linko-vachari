@@ -1,0 +1,23 @@
+{
+  "checkedAt": "2026-10-14T05:59:59.612Z",
+  "status": 403,
+  "url": "https://mymarket.ge/",
+  "title": "Just a moment...",
+  "text": "mymarket.ge\nPerforming security verification\n\nThis website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot.\n\nRay ID: a4a45c560a9f95a5\nPerformance and Security by Cloudflare\nPrivacy",
+  "links": [
+    {
+      "text": "Cloudflare",
+      "href": "https://www.cloudflare.com/?utm_source=challenge&utm_campaign=m"
+    },
+    {
+      "text": "Privacy",
+      "href": "https://www.cloudflare.com/privacypolicy/"
+    }
+  ],
+  "images": [
+    {
+      "src": "https://mymarket.ge/favicon.ico",
+      "alt": "Icon for mymarket.ge"
+    }
+  ]
+}

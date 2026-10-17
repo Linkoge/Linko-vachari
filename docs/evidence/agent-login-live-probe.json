@@ -1,0 +1,30 @@
+{
+  "checkedAt": "2026-10-15T13:40:00Z",
+  "kind": "live agent sign-in and Cloudflare probe (no real account; one attempt with an obviously fake identity)",
+  "cloudflare": {
+    "curlDefaultUserAgent": 403,
+    "curlChromeUserAgent": 200,
+    "playwrightHeadlessBundledChromium": 403,
+    "playwrightHeadlessSystemChrome": 403,
+    "playwrightHeadedXvfbBundledChromium": 200,
+    "playwrightHeadedXvfbSystemChrome": 200,
+    "playwrightHeadedWithDefaultAutomationFlags": 200,
+    "playwrightHeadlessWithHeadlessChromeRemovedFromUserAgent": 200,
+    "conclusion": "The 403 'Just a moment' challenge is triggered by the HeadlessChrome / default-library user agent. A headed persistent profile on the private Xvfb display (the application's default) is admitted; headless is admitted when the user agent no longer says HeadlessChrome."
+  },
+  "loginPage": {
+    "url": "https://auth.tnet.ge/ka/user/login/?Continue=<return url>",
+    "fields": ["Email or mobile number (text, name=Email)", "Password", "submit 'შესვლა'", "Google/Facebook/Apple buttons (never clicked)"],
+    "invisibleRecaptcha": true,
+    "siteOverlays": ["cookie consent 'ვეთანხმები ყველას'", "promo dialog 'გასაგებია'"],
+    "addListingEntry": "https://mymarket.ge/ka/pr-form/ redirects signed-out visitors to the login page with Continue=<form url>"
+  },
+  "agentRun": {
+    "identity": "linko.fake.probe@example.invalid with a random fake password",
+    "result": "agent reached the form, typed the fake credentials, submitted, and detected MyMarket's rejection toast ('სახელი ან პაროლი არასწორია') in about 16 seconds; state=failed with an owner-facing message; no retry was made",
+    "signedInVerified": false,
+    "otpPromptVerifiedLive": false,
+    "realListingsPublished": 0
+  },
+  "categoryDiscovery": "see codex-category-probe.json: live search, 3 comparable listings, category ტექნიკა > ფოტო > ფოტოკამერა"
+}

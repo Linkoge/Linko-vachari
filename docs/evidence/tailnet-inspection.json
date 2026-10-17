@@ -1,0 +1,62 @@
+{
+  "checkedAt": "2026-10-15T09:45:25.858Z",
+  "tailscaleVersion": "1.102.4",
+  "backend": "Running",
+  "online": true,
+  "ipv4": "100.97.154.71",
+  "dnsName": "codex-server.tail5ebb9d.ts.net",
+  "magicDNS": true,
+  "serve": {
+    "TCP": {
+      "443": {
+        "HTTPS": true
+      },
+      "3000": {
+        "HTTP": true
+      },
+      "8787": {
+        "HTTPS": true
+      }
+    },
+    "Web": {
+      "codex-server.tail5ebb9d.ts.net:3000": {
+        "Handlers": {
+          "/": {
+            "Proxy": "http://127.0.0.1:3000"
+          }
+        }
+      },
+      "codex-server.tail5ebb9d.ts.net:443": {
+        "Handlers": {
+          "/": {
+            "Proxy": "http://127.0.0.1:3000"
+          }
+        }
+      },
+      "codex-server.tail5ebb9d.ts.net:8787": {
+        "Handlers": {
+          "/": {
+            "Proxy": "http://127.0.0.1:8787"
+          }
+        }
+      }
+    }
+  },
+  "publicFunnelConfigured": false,
+  "existingManagerHttps": {
+    "url": "https://codex-server.tail5ebb9d.ts.net:8787/",
+    "httpStatus": 200,
+    "tlsVerificationResult": 0
+  },
+  "proposedAppUrl": "https://codex-server.tail5ebb9d.ts.net:8443/",
+  "appHttpsRoutePresent": false,
+  "appLoopbackListenerPresent": false,
+  "existingInteractiveFacilities": {
+    "sharedVncLoopback5901": true,
+    "sharedWebsockifyTailnet6080": true,
+    "xvfbInstalled": true
+  },
+  "managedPolicyFilePresent": false,
+  "environmentStatusToolAvailable": false,
+  "changedInfrastructure": false
+}

@@ -1,0 +1,30 @@
+import { test, expect } from '@playwright/test';
+test('assistant window: saves credentials privately, prompts for the code and sends it back, offers the browser only as a fallback', async ({ page }) => {
+  const calls: { path: string; method: string; body: unknown }[] = [];
+  let status: any = { state: 'idle', messages: [], awaiting: null, credentials: { configured: false, hint: '', source: 'none' }, signedInAt: null, sessionReused: false, working: false, fallbackAvailable: true };
+  await page.route('**/api/agent**', async route => {
+    const request = route.request(); const path = new URL(request.url()).pathname.replace('/api/agent', '') || '/';
+    if (request.method() !== 'GET') calls.push({ path, method: request.method(), body: request.postDataJSON() });
+    if (path === '/credentials' && request.method() === 'POST') status = { ...status, credentials: { configured: true, hint: '•••456', source: 'file' }, messages: [{ id: 1, role: 'agent', text: 'Saved your MyMarket details privately on this server.', at: '' }] };
+    if (path === '/login') status = { ...status, state: 'awaiting_code', awaiting: 'code', working: true, messages: [...status.messages, { id: 2, role: 'agent', text: 'MyMarket sent you a verification code by SMS or email. Type the code here and I will enter it.', at: '' }] };
+    if (path === '/message') status = { ...status, state: 'signed_in', awaiting: null, working: false, messages: [...status.messages, { id: 3, role: 'owner', text: '••••••', at: '' }, { id: 4, role: 'agent', text: 'Signed in.', at: '' }] };
+    await route.fulfill({ json: status });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: /Assistant/ }).click();
+  const window = page.getByLabel('Linko assistant');
+  await expect(window.getByLabel('MyMarket password')).toHaveAttribute('type', 'password');
+  await window.getByLabel('MyMarket phone or email').fill('555 123 456'); await window.getByLabel('MyMarket password').fill('fake-pass');
+  await window.getByRole('button', { name: 'Save privately' }).click();
+  await expect(window).toContainText('Saved your MyMarket details privately');
+  await expect(window.getByLabel('MyMarket password')).toHaveCount(0);
+  expect(calls[0]).toEqual({ path: '/credentials', method: 'POST', body: { identifier: '555 123 456', password: 'fake-pass' } });
+  await window.getByRole('button', { name: 'Sign in to MyMarket' }).click();
+  await expect(window).toContainText('verification code'); const code = window.getByLabel('Verification code'); await expect(code).toHaveAttribute('autocomplete', 'one-time-code');
+  await code.fill('482913'); await window.getByRole('button', { name: 'Send code' }).click();
+  await expect(window).toContainText('Signed in.'); await expect(window.getByLabel('Message to the assistant')).toHaveValue('');
+  expect(calls.at(-1)).toEqual({ path: '/message', method: 'POST', body: { text: '482913' } });
+  expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]).includes('fake-pass'))).toBe(false);
+  await expect(window.getByRole('button', { name: 'Open private browser (fallback)' })).toHaveCount(0);
+  status = { ...status, state: 'manual', fallbackAvailable: true }; await expect(window.getByRole('button', { name: 'Open private browser (fallback)' })).toBeVisible({ timeout: 5000 });
+});

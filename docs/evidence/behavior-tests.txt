@@ -1,0 +1,88 @@
+
+> linko-mymarketer@0.2.0 test /home/codex/projects/linko-mymarketer
+> tsx --test tests/*.test.ts
+
+TAP version 13
+# (node:1986067) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: tailnet host/identity boundary, protected panel login, CSRF, cookies, identity binding, expiry, logout and fail-closed setup
+ok 1 - tailnet host/identity boundary, protected panel login, CSRF, cookies, identity binding, expiry, logout and fail-closed setup
+  ---
+  duration_ms: 369.293542
+  type: 'test'
+  ...
+# Subtest: panel password guessing is bounded and identity/session information never enters responses
+ok 2 - panel password guessing is bounded and identity/session information never enters responses
+  ---
+  duration_ms: 427.129125
+  type: 'test'
+  ...
+# Subtest: supported Codex CLI transport validates structured outputs, withholds secret environment and removes transient results
+ok 3 - supported Codex CLI transport validates structured outputs, withholds secret environment and removes transient results
+  ---
+  duration_ms: 993.090302
+  type: 'test'
+  ...
+# (node:1986069) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: draft revisions, duplicate claims across draft IDs, crash recovery and receipt persistence
+ok 4 - draft revisions, duplicate claims across draft IDs, crash recovery and receipt persistence
+  ---
+  duration_ms: 31.057743
+  type: 'test'
+  ...
+# Subtest: actual image validation rejects videos and disguised files; normalizes photos without analysis
+ok 5 - actual image validation rejects videos and disguised files; normalizes photos without analysis
+  ---
+  duration_ms: 13.473597
+  type: 'test'
+  ...
+# Subtest: PWA manifest points to real PNG icons at installable sizes
+ok 6 - PWA manifest points to real PNG icons at installable sizes
+  ---
+  duration_ms: 4.671641
+  type: 'test'
+  ...
+# Subtest: navigation policy stops publishing, generic submits, account changes, outsider URLs and secrets
+ok 7 - navigation policy stops publishing, generic submits, account changes, outsider URLs and secrets
+  ---
+  duration_ms: 3.07104
+  type: 'test'
+  ...
+# Subtest: API cross-origin protection, optimistic revision conflicts, private photo access and publish confirmation
+ok 8 - API cross-origin protection, optimistic revision conflicts, private photo access and publish confirmation
+  ---
+  duration_ms: 139.58779
+  type: 'test'
+  ...
+# (node:1986160) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: owner-controlled browser input/frame uses the automation context, enforces leases and serializes with listing work
+ok 9 - owner-controlled browser input/frame uses the automation context, enforces leases and serializes with listing work
+  ---
+  duration_ms: 3451.905438
+  type: 'test'
+  ...
+# (node:1986187) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: semantic snapshots keep private field presence without values and recognize the live challenge
+ok 10 - semantic snapshots keep private field presence without values and recognize the live challenge
+  ---
+  duration_ms: 1847.656445
+  type: 'test'
+  ...
+# Subtest: connected semantic workflow: comparables, new live required field, review, guarded submit, durable receipt, stale form and unknown-response recovery
+ok 11 - connected semantic workflow: comparables, new live required field, review, guarded submit, durable receipt, stale form and unknown-response recovery
+  ---
+  duration_ms: 48051.664765
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 54594.673902

@@ -1,0 +1,13 @@
+
+> linko-mymarketer@0.2.0 build /home/codex/projects/linko-mymarketer
+> tsc --noEmit && vite build
+
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 32 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.69 kB │ gzip:  0.41 kB
+dist/assets/index-DQsot6y3.css   22.25 kB │ gzip:  5.84 kB
+dist/assets/index-lpDEKYGb.js   255.12 kB │ gzip: 78.77 kB
+✓ built in 1.43s

@@ -1,0 +1,21 @@
+# Candidate only. Operator must pin WorkingDirectory to the prepared app artifact.
+[Unit]
+Description=Linko MyMarketer private tailnet panel
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=codex
+WorkingDirectory=/home/codex/.local/share/linko-mymarketer/releases/mymarketer-codex-tailnet-20261014-v2/app
+EnvironmentFile=/home/codex/.config/linko-mymarketer/runtime.env
+Environment=NODE_ENV=production
+Environment=PATH=/home/codex/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/corepack pnpm start
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

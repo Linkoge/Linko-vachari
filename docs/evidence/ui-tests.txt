@@ -1,0 +1,23 @@
+
+> linko-mymarketer@0.2.0 test:ui /home/codex/projects/linko-mymarketer
+> playwright test
+
+[WebServer] (node:1987189) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:1987200) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:1987216) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:1987216) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:1987216) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+
+Running 3 tests using 1 worker
+
+(node:1987255) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 tests/ui/app.spec.ts:2:1 › photo workflow, local facts, editable review and actionable Codex execution failure (4.3s)
+  ✓  2 tests/ui/app.spec.ts:26:1 › responsive shell, private API exclusion, first-visit offline reload and local text persistence (2.5s)
+  ✓  3 tests/ui/setup.spec.ts:3:1 › protected panel sign-in is distinct from marketplace login; private browser controls and sign-out do not retain typed secrets (1.3s)
+
+  3 passed (13.7s)

@@ -1,0 +1,45 @@
+{
+  "name": "linko-mymarketer",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.18.3",
+  "scripts": {
+    "dev": "tsx server/index.ts",
+    "build": "tsc --noEmit && vite build",
+    "start": "NODE_ENV=production tsx server/index.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "test:ui": "playwright test",
+    "browser:install": "playwright install chromium",
+    "market:inspect": "tsx scripts/inspect-market.ts",
+    "market:login": "tsx scripts/login.ts",
+    "security:check": "tsx scripts/security-check.ts",
+    "panel:setup": "tsx scripts/panel-setup.ts",
+    "codex:probe": "tsx scripts/codex-probe.ts",
+    "release:prepare": "tsx scripts/prepare-release.ts",
+    "release:verify": "tsx scripts/verify-release.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "multer": "^2.0.2",
+    "playwright": "^1.56.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "sharp": "^0.35.5",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/express": "^5.0.3",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.18.11",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10"
+  }
+}

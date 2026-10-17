@@ -1,0 +1,23 @@
+{
+  "checkedAt": "2026-10-15T13:54:10.420Z",
+  "kind": "synthetic search-only live integration probe",
+  "backend": "official Codex CLI with ChatGPT sign-in",
+  "state": "review",
+  "message": "Category found from live comparable listings. Review the title, cover and details, then check the listing form.",
+  "category": [
+    "ტექნიკა",
+    "ფოტო",
+    "ფოტოკამერა"
+  ],
+  "comparableUrls": [
+    "https://mymarket.ge/product/axalivit/teqnika/potokamera/canon-eos-r50-axalivit-mdgomareobashi-36308594/",
+    "https://mymarket.ge/product/axali/teqnika/potokamera/canon-eos-r50-mirrorless-camera-with-18-45mm-lens-black-32926666/",
+    "https://mymarket.ge/product/axali/teqnika/potokamera/potoaparati-canon-eos-r50-rfs-18-45mm-5811c033aa-35979017/"
+  ],
+  "comparableCount": 3,
+  "mainPhotoUnchanged": true,
+  "photoInputsToCodex": 0,
+  "marketplacePhotoUploads": 0,
+  "marketplacePublications": 0,
+  "authenticatedListingIntegrationVerified": false
+}

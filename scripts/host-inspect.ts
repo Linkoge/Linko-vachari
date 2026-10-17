@@ -1,0 +1,11 @@
+import { execFileSync } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+const status = JSON.parse(execFileSync('tailscale', ['status', '--json'], { encoding: 'utf8', timeout: 10_000 }));
+const serve = JSON.parse(execFileSync('tailscale', ['serve', 'status', '--json'], { encoding: 'utf8', timeout: 10_000 }));
+const funnel = JSON.parse(execFileSync('tailscale', ['funnel', 'status', '--json'], { encoding: 'utf8', timeout: 10_000 }));
+const dns = String(status.Self?.DNSName || '').replace(/\.$/, '');
+const tls = execFileSync('curl', ['--max-time', '12', '-sS', '-o', '/dev/null', '-w', '%{http_code} %{ssl_verify_result}', `https://${dns}:8787/`], { encoding: 'utf8' }).trim();
+const listeners = execFileSync('ss', ['-ltnH'], { encoding: 'utf8' });
+const receipt = { checkedAt: new Date().toISOString(), tailscaleVersion: execFileSync('tailscale', ['version'], { encoding: 'utf8' }).split('\n')[0], backend: status.BackendState, online: status.Self?.Online, ipv4: status.Self?.TailscaleIPs?.find((v: string) => !v.includes(':')), dnsName: dns, magicDNS: status.CurrentTailnet?.MagicDNSEnabled, serve, publicFunnelConfigured: !!funnel.AllowFunnel && Object.values(funnel.AllowFunnel).some(Boolean), existingManagerHttps: { url: `https://${dns}:8787/`, httpStatus: Number(tls.split(' ')[0]), tlsVerificationResult: Number(tls.split(' ')[1]) }, proposedAppUrl: `https://${dns}:8443/`, appHttpsRoutePresent: !!serve.Web?.[dns + ':8443'], appLoopbackListenerPresent: /127\.0\.0\.1:4310\s/.test(listeners), existingInteractiveFacilities: { sharedVncLoopback5901: /127\.0\.0\.1:5901\s/.test(listeners), sharedWebsockifyTailnet6080: listeners.includes(':6080 '), xvfbInstalled: existsSync('/usr/bin/Xvfb') }, managedPolicyFilePresent: existsSync('/etc/codex/network-policy.json'), environmentStatusToolAvailable: false, changedInfrastructure: false };
+await writeFile('docs/evidence/tailnet-inspection.json', JSON.stringify(receipt, null, 2)); console.log(JSON.stringify(receipt));
