@@ -26,11 +26,13 @@ Codex uses its own saved ChatGPT sign-in through supported [non-interactive exec
 
 Observed server IP: **100.97.154.71**. Observed hostname: **codex-server.tail5ebb9d.ts.net**. The proposed application address is **https://codex-server.tail5ebb9d.ts.net:8443/**, but it is **not active**. The existing service on port 8787 is the manager, not this app. No service, route or tailnet permissions were changed.
 
-The prepared release is `mymarketer-codex-tailnet-20261014-v2`. An operator must activate its dedicated service and HTTPS Serve route following [the execution report](docs/EXECUTION_REPORT.md#manager-activation-handoff). The app stays on loopback port 4310. Tailscale Serve supplies trusted user identity; an app-side hashed login allowlist and separate panel password protect the workspace. Funnel/public hosting is unsupported. Tailnet ACLs must authorize the intended owner/device; this implementation does not change them.
+The prepared release is `mymarketer-codex-tailnet-20261014-v2`. An operator must activate its dedicated service and HTTPS Serve route following [the execution report](docs/EXECUTION_REPORT.md#manager-activation-handoff). The app stays on loopback port 4310. Tailscale Serve supplies trusted user identity; an app-side hashed login allowlist and, by default, a separate panel password protect the workspace. Funnel/public hosting is unsupported. Tailnet ACLs must authorize the intended owner/device; this implementation does not change them.
+
+In current source, set `LINKO_PANEL_AUTH=false` in the private runtime environment to open the panel and API without the panel login, even with `LINKO_PUBLIC_ORIGIN` configured. Only exact `false` opts out; unset or unrecognized values keep tailnet password protection, and `true` also enables it in local mode. The existing `panel:setup` identity allowlist in `LINKO_DATA_DIR/access.json` remains required for tailnet access; missing or malformed settings still deny access. Setup still records a password hash, but the panel does not ask for that password in opt-out mode. Keep `HOST=127.0.0.1` and use only tailnet-only Tailscale Serve, never Funnel. Startup rejects every non-loopback bind address, including Tailscale IPs. Remote Host must match the configured HTTPS origin exactly, and writes still require that Origin and `X-Linko-Request: 1`; local-only mode accepts loopback hosts. The previously prepared artifact predates this opt-out change and must be rebuilt to include it.
 
 After the operator confirms activation:
 
-1. Connect your phone to the authorized tailnet and open the HTTPS address supplied by the operator. Sign in with your **Linko panel password**.
+1. Connect your phone to the authorized tailnet and open the HTTPS address supplied by the operator. Sign in with your **Linko panel password**, unless the operator explicitly set `LINKO_PANEL_AUTH=false`.
 2. Open the **Assistant** window (bottom-right). Enter your MyMarket phone/email and password **once** in its masked form; the server stores them privately (see below). Press **Sign in to MyMarket** or type “sign in”. The assistant signs in inside the persistent automation browser itself. If MyMarket asks for an SMS/email code, the window opens and asks; type the code back into it. No browser driving by you.
 3. The signed-in session lives in the persistent browser profile and is reused: later listing runs check the session first and only sign in again (asking for a new code if required) when it has expired. Only if the assistant truly cannot proceed (for example a visual puzzle) does it show **Open private browser (fallback)**; that view is the older click-and-type remote browser under **Connection & setup**, and **Finish login & return** releases it.
 4. Use Chrome's **Install app** or Safari's **Share → Add to Home Screen** on the verified HTTPS origin.
@@ -58,7 +60,7 @@ For local environment credentials, copy the empty placeholders from `.env.exampl
 
 `pnpm test` includes a permanent index check that rejects tracked environment files, private keys, credential JSON and cookie/token/session data, even if force-added or missing from the working tree. Only `.env.example` and `runtime.env.example` are allowed environment templates, with empty credential fields. `pnpm security:check` also scans reachable git history without printing credential values. If a real credential is found, retain its local copy, remove it from the index with `git rm --cached -- <file>`, and rotate it with the service provider. Removing it at HEAD leaves historical exposure intact; do not rewrite history or force-push as part of this cleanup.
 
-Runtime files are not encrypted at rest. Use a trusted OS account and encrypted disk. This is one owner's workspace and one marketplace session; authorized panel users share it. Loopback is a trusted OS boundary: unrelated local processes must also be trusted. Remote access requires the exact configured HTTPS origin, trusted loopback Tailscale proxy, allowlisted identity, secure panel session, and CSRF checks. Tagged devices without user identity fail closed.
+Runtime files are not encrypted at rest. Use a trusted OS account and encrypted disk. This is one owner's workspace and one marketplace session; authorized panel users share it. Loopback is a trusted OS boundary: unrelated local processes must also be trusted. Remote access requires the exact configured HTTPS origin, trusted loopback Tailscale proxy, allowlisted identity and CSRF checks. A secure panel session is also required unless `LINKO_PANEL_AUTH=false` explicitly disables the panel password; passwordless users share the trusted workspace and manual-browser lease. Tagged devices without user identity fail closed.
 
 The PWA caches the public shell and saves draft text/previews in IndexedDB. Private API responses, browser frames and credentials are not cached by the service worker. Offline text edits require explicit save after reconnecting; uploads and publishing are never queued offline. Panel sign-out clears local draft storage. Anyone using the same unlocked browser/device can access its offline drafts; keep the device private.
 
@@ -68,7 +70,7 @@ Cloudflare: the earlier 403 came from automation fingerprints (the default `Head
 
 ```sh
 corepack pnpm build
-corepack pnpm exec tsx --test tests/access.test.ts tests/codex.test.ts tests/manual.test.ts tests/secret-files.test.ts
+corepack pnpm exec tsx --test tests/access.test.ts tests/config.test.ts tests/codex.test.ts tests/manual.test.ts tests/secret-files.test.ts
 corepack pnpm test:ui
 corepack pnpm security:check
 corepack pnpm audit --prod

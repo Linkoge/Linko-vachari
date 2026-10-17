@@ -51,3 +51,57 @@ test('panel password guessing is bounded and identity/session information never 
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   try { for (let i = 0; i < 6; i++) assert.equal((await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Linko-Request': '1' }, body: JSON.stringify({ password: ['wrong', 'panel', 'value'].join('-') }) })).status, 401); assert.equal((await fetch(base + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Linko-Request': '1' }, body: JSON.stringify({ password }) })).status, 429); const status = await (await fetch(base + '/api/auth/status')).text(); assert.equal(status.includes(login), false); assert.equal(status.includes(passwordHash(password, salt)), false); } finally { server.close(); store.db.close(); }
 });
+test('explicit password opt-out allows the tailnet panel and API while retaining the proxy and CSRF boundary', async () => {
+  const access = new AccessBoundary(origin, { salt, passwordHash: passwordHash(password, salt), allowedLoginHashes: [hashIdentity(login)] }, false);
+  const store = new Store(':memory:'); const { app } = createApp(store, undefined, access);
+  // Model the production shell behind the same boundary without depending on a build.
+  app.get('/', (_req, res) => res.send('<main>Linko panel</main>'));
+  const server = app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.on('listening', r));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const headers = { Host: new URL(origin).host, 'Tailscale-User-Login': login, 'X-Forwarded-Proto': 'https', 'X-Linko-Request': '1', 'Content-Type': 'application/json', Origin: origin };
+  try {
+    const panel = await fetch(base + '/', { headers }); assert.equal(panel.status, 200); assert.match(await panel.text(), /Linko panel/);
+    const status = await fetch(base + '/api/auth/status', { headers });
+    assert.deepEqual(await status.json(), { protected: false, signedIn: true, configured: true, tailnet: true });
+    const health = await fetch(base + '/api/health', { headers }); assert.equal(health.status, 200);
+    assert.equal(health.headers.get('cache-control'), 'no-store'); assert.equal(health.headers.get('set-cookie'), null);
+    const created = await fetch(base + '/api/drafts', { method: 'POST', headers, body: '{}' }); assert.equal(created.status, 201);
+    const draft = await created.json(); assert.equal((await fetch(base + '/api/drafts/' + draft.id, { headers })).status, 200);
+    assert.equal(access.sessions.size, 0, 'no panel login or session cookie is needed');
+    const invalidHeaders: Record<string, string>[] = [
+      { Host: 'evil.example' }, { Host: 'other-node.test-tailnet.ts.net:8443' },
+      { Origin: 'https://evil.example' }, { Origin: origin + '.evil.example' },
+      { 'Tailscale-User-Login': '' }, { 'Tailscale-User-Login': 'outsider@example.invalid' },
+      { 'X-Forwarded-Proto': '' }, { 'X-Forwarded-Proto': 'http' },
+      { 'Tailscale-Funnel-Request': '?1' }, { 'Sec-Fetch-Site': 'cross-site' },
+    ];
+    for (const overrides of invalidHeaders) {
+      const deniedHeaders = { ...headers, ...overrides };
+      for (const path of ['/', '/api/health']) assert.equal((await fetch(base + path, { headers: deniedHeaders })).status, 403, JSON.stringify(overrides));
+      assert.equal((await fetch(base + '/api/drafts', { method: 'POST', headers: deniedHeaders, body: '{}' })).status, 403);
+    }
+    for (const missing of ['Origin', 'X-Linko-Request']) {
+      const incomplete: Record<string, string> = { ...headers }; delete incomplete[missing];
+      assert.equal((await fetch(base + '/api/drafts', { method: 'POST', headers: incomplete, body: '{}' })).status, 403);
+    }
+    const noOrigin: Record<string, string> = { ...headers }; delete noOrigin.Origin;
+    assert.equal((await fetch(base + '/', { headers: noOrigin })).status, 200, 'same-origin page navigation needs no Origin header');
+    assert.equal(access.identity({ headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])), socket: { remoteAddress: '100.64.0.20' } } as any), '');
+    access.settings = undefined;
+    assert.equal((await fetch(base + '/api/health', { headers })).status, 403, 'missing allowlist still fails closed');
+  } finally { server.close(); store.db.close(); }
+});
+test('passwordless local mode accepts only loopback hosts and same-origin requests', async () => {
+  const store = new Store(':memory:'); const { app } = createApp(store, undefined, new AccessBoundary('', undefined, false));
+  const server = app.listen(0, '127.0.0.1'); await new Promise<void>(r => server.on('listening', r));
+  const port = (server.address() as { port: number }).port, base = `http://127.0.0.1:${port}`;
+  try {
+    for (const host of ['127.0.0.1', 'localhost', '[::1]']) {
+      const headers = { Host: `${host}:${port}`, Origin: `http://${host}:${port}`, 'X-Linko-Request': '1', 'Content-Type': 'application/json' };
+      assert.equal((await fetch(base + '/api/health', { headers })).status, 200);
+      assert.equal((await fetch(base + '/api/drafts', { method: 'POST', headers, body: '{}' })).status, 201);
+    }
+    assert.equal((await fetch(base + '/api/health', { headers: { Host: 'evil.example' } })).status, 403);
+    assert.equal((await fetch(base + '/api/health', { headers: { Origin: origin } })).status, 403);
+  } finally { server.close(); store.db.close(); }
+});

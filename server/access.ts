@@ -15,9 +15,10 @@ export class AccessBoundary {
   readonly cookie: string;
   settings?: AccessSettings;
   constructor(public origin = config.publicOrigin, settings?: AccessSettings, protect = config.panelAuth) {
-    this.protected = !!origin || protect; this.cookie = origin ? '__Host-linko-panel' : 'linko-local-panel';
+    this.protected = protect ?? !!origin; this.cookie = origin ? '__Host-linko-panel' : 'linko-local-panel';
     if (settings) this.settings = settings;
-    else if (this.protected) { try { this.settings = accessSettingsSchema.parse(JSON.parse(readFileSync(join(privateDir, 'access.json'), 'utf8'))); } catch { /* fail closed; public status reports setup only */ } }
+    // The tailnet identity allowlist is required even when the panel password is disabled.
+    else if (origin || this.protected) { try { this.settings = accessSettingsSchema.parse(JSON.parse(readFileSync(join(privateDir, 'access.json'), 'utf8'))); } catch { /* fail closed; public status reports setup only */ } }
   }
   identity(req: Request) {
     if (!this.origin) return 'local';

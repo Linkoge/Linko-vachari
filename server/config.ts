@@ -10,7 +10,8 @@ export const config = {
   codexBinary: process.env.LINKO_CODEX_BINARY || 'codex', codexModel: process.env.LINKO_CODEX_MODEL || '',
   codexTimeout: Number(process.env.LINKO_CODEX_TIMEOUT_MS || 150_000),
   publicOrigin: process.env.LINKO_PUBLIC_ORIGIN || '',
-  panelAuth: process.env.LINKO_PANEL_AUTH === 'true',
+  // An unset value keeps the origin-dependent default; only exact false opts out.
+  panelAuth: process.env.LINKO_PANEL_AUTH === 'false' ? false : process.env.LINKO_PANEL_AUTH === 'true' ? true : undefined,
   releaseId: process.env.LINKO_RELEASE_ID || 'development',
   headless: process.env.HEADLESS === 'true', publish: process.env.ALLOW_PUBLISH === 'true',
 };
