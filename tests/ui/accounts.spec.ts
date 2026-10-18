@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomInt } from 'node:crypto';
 test('Settings saves several accounts privately and draft account choice persists as the next default', async ({ page }, info) => {
   const marker = randomUUID();
   await page.goto('/');
@@ -15,6 +15,16 @@ test('Settings saves several accounts privately and draft account choice persist
     await expect(accounts.getByLabel('Account password')).toHaveValue('');
   }
   await expect(accounts).toContainText('0 of 5 free listings used');
+  const defaults = accounts.getByRole('form', { name: 'Defaults for Personal', exact: true });
+  await expect(defaults.getByLabel('Default city')).toHaveValue('თბილისი');
+  const phone = '5' + randomInt(10_000_000, 99_999_999);
+  await defaults.getByLabel('Default city').fill('ბათუმი');
+  await defaults.getByLabel('Listing phone number').fill(phone);
+  await defaults.getByRole('button', { name: 'Save account defaults' }).click();
+  await expect(defaults.getByRole('button')).toBeEnabled();
+  await page.reload();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(defaults.getByLabel('Listing phone number')).toHaveValue(phone);
   await accounts.screenshot({ path: info.outputPath('accounts-settings.png') });
   const response = await page.request.get('/api/accounts'); const raw = await response.text(); expect(raw).not.toContain(marker); expect(raw).not.toContain('owner@x.io');
   const list = JSON.parse(raw).accounts;
@@ -22,9 +32,12 @@ test('Settings saves several accounts privately and draft account choice persist
   await page.getByRole('button', { name: 'New draft' }).click();
   await expect(page.getByLabel('Listing account')).toHaveValue(list.find((a: any) => a.label === 'Shop').id);
   await page.getByLabel('Listing account').selectOption(list.find((a: any) => a.label === 'Personal').id);
+  await expect(page.getByLabel('City', { exact: true })).toHaveValue('ბათუმი');
+  await page.getByLabel('City', { exact: true }).fill('ქუთაისი');
   await expect(page.locator('.lean-publish span')).toHaveText('Saved');
   await page.getByRole('button', { name: 'New draft' }).click();
   await expect(page.getByLabel('Listing account')).toHaveValue(list.find((a: any) => a.label === 'Personal').id);
+  await expect(page.getByLabel('City', { exact: true })).toHaveValue('ბათუმი');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   page.once('dialog', d => d.accept());
   await accounts.getByRole('button', { name: 'Remove account Shop' }).click();

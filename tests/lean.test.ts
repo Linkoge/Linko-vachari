@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomInt } from 'node:crypto';
+import { Accounts } from '../server/accounts';
 import { SettingsStore } from '../server/settings';
 import { Store } from '../server/store';
 import { Workflow } from '../server/workflow';
@@ -149,5 +150,61 @@ test('disabling publishing during a final audit prevents the irreversible claim 
     assert.equal(f.flow.archive.all().length, 0); assert.equal(d.state, 'ready');
     settings.automation = { publish: true, autoRelist: false }; f.settings.save(settings); d.relistOf = 'original';
     await assert.rejects(f.flow.publish(d), /disabled in Settings/);
+  } finally { await f.close(); }
+});
+
+test('account city/phone defaults are private, isolated, migrated and used for each new draft', { timeout: 30_000 }, async () => {
+  const f = await fixture();
+  try {
+    const first = f.flow.accounts.defaultId;
+    const second = f.flow.accounts.add({ label: 'Other', identifier: 'other@x.io', password: randomUUID() });
+    const phone = '5' + randomInt(10_000_000, 99_999_999);
+    const path = f.base + '/settings/accounts/' + first + '/defaults';
+    assert.equal((await fetch(path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ location: 'ბათუმი', phone }) })).status, 403);
+    const put = await fetch(path, { method: 'PUT', headers, body: JSON.stringify({ location: 'ბათუმი', phone }) });
+    assert.equal(put.status, 200); assert.equal(put.headers.get('cache-control'), 'no-store');
+    const restored = new Accounts(f.flow.accounts.legacy, f.store);
+    assert.deepEqual(restored.defaults(first), { location: 'ბათუმი', phone });
+    assert.deepEqual(restored.defaults(second), { location: 'თბილისი', phone: '' });
+    assert.equal(statSync(restored.file).mode & 0o777, 0o600);
+    f.flow.accounts.use(first);
+    const create = async () => (await (await fetch(f.base + '/drafts', { method: 'POST', headers, body: '{}' })).json());
+    const d = await create(); assert.equal(d.location, 'ბათუმი'); assert.equal(d.accountId, first); assert.equal(JSON.stringify(d).includes(phone), false);
+    const { id, photos, state, message, events, fields, questions, comparables, ...values } = d;
+    assert.equal((await fetch(f.base + '/drafts/' + id, { method: 'PATCH', headers, body: JSON.stringify({ ...values, location: 'ქუთაისი' }) })).status, 200);
+    assert.equal(f.store.get(id).location, 'ქუთაისი'); assert.equal((await create()).location, 'ბათუმი');
+    // Pre-upgrade account documents acquire the city default without reading live data.
+    const old = JSON.parse(readFileSync(restored.file, 'utf8')); delete old.accounts.find((a: { id: string }) => a.id === second).defaults;
+    writeFileSync(restored.file, JSON.stringify(old));
+    assert.deepEqual(new Accounts(f.flow.accounts.legacy, f.store).defaults(second), { location: 'თბილისი', phone: '' });
+  } finally { await f.close(); }
+});
+
+test('existing needs_input drafts expose reasons and resume through PATCH and Publish without another category search', { timeout: 30_000 }, async () => {
+  const f = await fixture();
+  try {
+    const settings = f.settings.load(); settings.automation.publish = true; f.settings.save(settings);
+    const d = await f.item('nikon D3400'); d.category = ['Cameras'];
+    const job = f.queue.enqueue(d.id, 'submit');
+    d.state = 'needs_input'; d.questions = [{ key: 'Power', label: 'Power source', options: ['Mains', 'Battery'] }];
+    f.store.save(d); f.store.db.prepare("UPDATE jobs SET status='failed' WHERE id=?").run(job.id);
+    const rows = async () => (await (await fetch(f.base + '/listings')).json()).listings;
+    let row = (await rows()).find((r: { id: string }) => r.id === d.id);
+    assert.equal(row.status, 'needs_input'); assert.equal(row.draftId, d.id); assert.match(row.reason, /Power source/);
+    f.store.recover(); assert.equal(f.store.get(d.id).state, 'needs_input');
+    const { id, photos, state, message, events, fields, questions, comparables, ...values } = d;
+    const update = await fetch(f.base + '/drafts/' + id, { method: 'PATCH', headers, body: JSON.stringify({ ...values, facts: { Power: 'Battery' } }) });
+    assert.equal(update.status, 200); const saved = await update.json();
+    f.flow.useAccount = async () => {};
+    f.flow.prepare = async draft => { assert.equal(draft.facts.Power, 'Battery'); draft.questions = []; draft.state = 'ready'; };
+    let submitted = 0; f.flow.publish = async draft => { submitted++; draft.state = 'published'; };
+    const publish = await fetch(f.base + '/drafts/' + id + '/publish', { method: 'POST', headers, body: JSON.stringify({ revision: saved.revision }) });
+    assert.equal(publish.status, 202); assert.equal((await publish.json()).nextDraft.location, 'თბილისი');
+    await f.queue.drain(); assert.equal(submitted, 1);
+    const failed = await f.item('Real failure'); const failedJob = f.queue.enqueue(failed.id, 'submit');
+    failed.state = 'blocked'; f.store.event(failed, 'MyMarket did not accept the selected category.');
+    f.store.db.prepare("UPDATE jobs SET status='failed' WHERE id=?").run(failedJob.id);
+    row = (await rows()).find((r: { id: string }) => r.id === failed.id);
+    assert.equal(row.status, 'failed'); assert.match(row.reason, /did not accept/);
   } finally { await f.close(); }
 });

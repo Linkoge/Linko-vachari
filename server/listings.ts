@@ -4,6 +4,7 @@ import { isListingUrl, onAuthPage } from './browser';
 import type { Store } from './store';
 import type { Workflow } from './workflow';
 import { Draft, WorkflowError } from './types';
+import { itemFacts } from './required-info';
 
 export const CHECK_INTERVAL = 3 * 60 * 60_000;
 export const MISSING_RECHECK = 60 * 60_000;
@@ -24,7 +25,7 @@ export function listingMarkdown(r: ListingRecord) {
     `## Category / section\n\n${literal(d.category)}\n\n` +
     `## Listing text and price (exact JSON strings)\n\n` +
     ['title', 'description', 'price', 'currency', 'model', 'condition', 'location'].map(k => `- ${k}: ${literal(d[k as keyof Draft])}`).join('\n') +
-    `\n\n## Supplied facts\n\n${Object.entries(d.facts).map(([k, v]) => `- ${literal(k)}: ${literal(v)}`).join('\n')}\n\n` +
+    `\n\n## Supplied facts\n\n${Object.entries(itemFacts(d.facts, d.questions)).map(([k, v]) => `- ${literal(k)}: ${literal(v)}`).join('\n')}\n\n` +
     `## Observed form fields\n\n${d.fields.map(f => `- ${literal(f.label)} = ${literal(f.value)} (source: ${literal(f.source)})`).join('\n')}\n\n` +
     `## Photos in upload order (first is cover)\n\n` +
     [d.coverId, ...d.photos.map(p => p.id).filter(id => id !== d.coverId)].filter(Boolean).map((id, i) => `${i + 1}. ../photos/${id}.jpg`).join('\n') +

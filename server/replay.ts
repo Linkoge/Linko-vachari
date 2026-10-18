@@ -5,7 +5,7 @@ export type SemanticTarget = Pick<ElementInfo, 'tag' | 'role' | 'type' | 'label'
 export interface SavedStep { action: 'click' | 'fill' | 'select' | 'upload' | 'wait'; target: SemanticTarget; source: string; value: string }
 export interface RecipeAutomation { steps: SavedStep[]; controls?: ReturnType<typeof controls>; images?: string[]; text?: string; confirmation?: string }
 export class ScriptChanged extends WorkflowError { constructor(message = 'The marketplace page changed; the saved semantic step no longer matches.') { super('SCRIPT_CHANGED', message); } }
-export const privateControl = (e: ElementInfo) => e.type === 'password' || /phone|email|password|ტელეფონ|ელ.?ფოსტ|პაროლ/i.test(e.label + (e.group || ''));
+export const privateControl = (e: ElementInfo) => e.type === 'password' || /phone|mobile|email|password|მობილურ|ტელეფონ|ელ.?ფოსტ|პაროლ/i.test(e.label + (e.group || ''));
 export function signature(e: ElementInfo): SemanticTarget { return { tag: e.tag, role: e.role, type: e.type, label: e.label, group: e.group || '' }; }
 export function matches(e: ElementInfo, t: SemanticTarget) { return e.tag === t.tag && e.role === t.role && e.type === t.type && e.label === t.label && (e.group || '') === (t.group || ''); }
 export function resolveStep(snapshot: Snapshot, step: SavedStep) {

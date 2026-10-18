@@ -14,6 +14,7 @@ import { AccessBoundary } from './access';
 import { providerStatus } from './codex';
 import { providerModels, validateModelChanges } from './ai-models';
 import { addAccountSchema } from './accounts';
+import { accountField, itemFacts } from './required-info';
 import { aiSchema, automationSchema } from './settings';
 import { myListings } from './listing-summary';
 import { PublishQueue } from './queue';
@@ -41,6 +42,7 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   const idle = () => { if (workflow.busy || workflow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review first.'); };
   app.get('/api/accounts', (_req, res) => res.json({ accounts: workflow.accounts.view(), lastUsed: workflow.accounts.defaultId }));
   app.post('/api/settings/accounts', (req, res) => { idle(); workflow.accounts.add(addAccountSchema.parse(req.body)); res.json({ accounts: workflow.accounts.view() }); });
+  app.put('/api/settings/accounts/:id/defaults', (req, res) => { workflow.accounts.saveDefaults(req.params.id, req.body); res.json({ accounts: workflow.accounts.view() }); });
   app.delete('/api/settings/accounts/:id', async (req, res) => {
     idle(); const id = req.params.id;
     workflow.busy = true;
@@ -94,7 +96,12 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     const history = new Set(workflow.archive.all().map(r => r.id));
     res.json({ drafts: store.all().filter(d => !history.has(d.id) && !['published', 'unknown', 'publishing', 'queued', 'analyzing', 'preparing'].includes(d.state)) });
   });
-  app.post('/api/drafts', (_req, res) => res.status(201).json(store.create(workflow.accounts.defaultId || undefined)));
+  const newDraft = (accountId = workflow.accounts.defaultId) => {
+    const d = store.create(accountId || undefined);
+    if (accountId) { d.location = workflow.accounts.defaults(accountId).location; store.save(d); }
+    return d;
+  };
+  app.post('/api/drafts', (_req, res) => res.status(201).json(newDraft()));
   app.get('/api/listings', (_req, res) => res.json({ listings: myListings(workflow, queue) }));
   app.get('/api/listings/:id/cover', (req, res) => {
     const d = workflow.archive.get(req.params.id).recipe;
@@ -151,7 +158,12 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
       d.photos = patch.photoOrder.map(id => d.photos.find(p => p.id === id)!);
     }
     const { photoOrder, ...values } = patch;
+    // Older needs_input drafts used facts for all answers, including city.
+    for (const q of d.questions) if (accountField(q) === 'location' && patch.facts[q.key] && patch.facts[q.key] !== d.facts[q.key]) values.location = patch.facts[q.key];
+    const contact = d.questions.find(q => accountField(q) === 'phone' && patch.facts[q.key]);
+    if (contact) values.facts = { ...itemFacts(patch.facts, d.questions), phone: patch.facts[contact.key] };
     Object.assign(d, values); d.revision++; d.state = d.category.length ? 'review' : 'draft'; delete d.preparedRevision;
+    if (d.questions.length) d.state = 'needs_input';
     invalidate(d.id); store.save(d); res.json(d);
   });
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024, files: 8, fields: 0, parts: 8 } });
@@ -203,7 +215,7 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
       if (!d.title.trim()) throw new WorkflowError('INPUT', 'Add a title.');
       const job = queue.enqueue(d.id, 'submit');
       // Persist the next independent draft before responding; the editor can reset in one round trip.
-      const nextDraft = store.create(d.accountId);
+      const nextDraft = newDraft(d.accountId);
       res.status(202).json({ accepted: true, job, nextDraft });
     } else if (operation === 'analyze') {
       res.status(202).json({ accepted: true, job: queue.enqueue(d.id, 'analyze') });

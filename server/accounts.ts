@@ -6,8 +6,10 @@ import { CredentialVault, credentialsSchema, type Credentials } from './credenti
 import { registerSecret } from './secrets';
 import { WorkflowError } from './types';
 import type { Store } from './store';
+import { defaultCity } from './required-info';
 
-const account = z.object({ id: z.string(), label: z.string(), credentials: credentialsSchema.optional(), removed: z.boolean().optional(), initialized: z.boolean().optional(), identityHash: z.string().optional() });
+export const accountDefaultsSchema = z.object({ location: z.string().trim().min(1).max(200), phone: z.string().trim().max(40).refine(v => !v || /^[+\d\s()-]+$/.test(v) && v.replace(/\D/g, '').length >= 7, 'Enter a valid phone number.') }).strict();
+const account = z.object({ id: z.string(), label: z.string(), defaults: accountDefaultsSchema.default({ location: defaultCity, phone: '' }), credentials: credentialsSchema.optional(), removed: z.boolean().optional(), initialized: z.boolean().optional(), identityHash: z.string().optional() });
 const schema = z.object({ version: z.literal(1), lastUsed: z.string(), accounts: z.array(account) });
 export const addAccountSchema = credentialsSchema.extend({ label: z.string().trim().min(1).max(80) }).strict();
 const identity = (identifier: string) => createHash('sha256').update(identifier.trim().toLocaleLowerCase()).digest('hex');
@@ -20,11 +22,12 @@ export class Accounts {
     this.file = join(dirname(legacy.file), 'mymarket-accounts.json');
     if (existsSync(this.file)) this.data = schema.parse(JSON.parse(readFileSync(this.file, 'utf8')));
     else {
-      this.data = { version: 1, lastUsed: 'legacy', accounts: [{ id: 'legacy', label: 'MyMarket', credentials: legacy.get(), initialized: !!legacy.get() || existsSync(join(dirname(legacy.file), 'browser')) }] };
+      this.data = schema.parse({ version: 1, lastUsed: 'legacy', accounts: [{ id: 'legacy', label: 'MyMarket', credentials: legacy.get(), initialized: !!legacy.get() || existsSync(join(dirname(legacy.file), 'browser')) }] });
       this.persist();
     }
     // A tombstone prevents removed environment credentials from reappearing after restart.
     for (const a of this.data.accounts) if (a.credentials) { a.initialized = true; a.identityHash = identity(a.credentials.identifier); registerSecret(a.credentials.identifier); registerSecret(a.credentials.password); }
+    for (const a of this.data.accounts) if (a.defaults.phone) registerSecret(a.defaults.phone);
     this.persist(); this.migrate();
   }
   private persist() {
@@ -46,6 +49,13 @@ export class Accounts {
     return a;
   }
   use(id: string) { this.require(id); if (this.data.lastUsed !== id) { this.data.lastUsed = id; this.persist(); } }
+  defaults(id = this.defaultId) { return { ...this.require(id).defaults }; }
+  saveDefaults(id: string, input: unknown) {
+    const defaults = accountDefaultsSchema.parse(input);
+    this.require(id).defaults = defaults;
+    if (defaults.phone) registerSecret(defaults.phone);
+    this.persist();
+  }
   view() {
     const records = this.store.db.prepare('SELECT data FROM listing_records').all() as { data: string }[];
     return this.data.accounts.filter(a => !a.removed).map(a => {
@@ -56,13 +66,13 @@ export class Accounts {
         if ((r.recipe.accountId || 'legacy') === a.id && r.receipt && !['missing', 'replaced', 'deleted_by_owner'].includes(r.status)) urls.add(r.receipt.url);
       }
       const v = this.vault(a.id);
-      return { id: a.id, label: a.label, ...v.status(), activeListings: urls.size, freeLimit: 5 };
+      return { id: a.id, label: a.label, defaults: { ...a.defaults }, ...v.status(), activeListings: urls.size, freeLimit: 5 };
     });
   }
   add(input: unknown) {
     const { label, ...credentials } = addAccountSchema.parse(input);
     const placeholder = this.data.accounts.find(a => a.id === 'legacy' && !a.removed && !a.credentials && !a.initialized);
-    const a: Account = placeholder || { id: randomUUID(), label };
+    const a: Account = placeholder || { id: randomUUID(), label, defaults: { location: defaultCity, phone: '' } };
     a.label = label; a.credentials = credentials; a.initialized = true; a.identityHash = identity(credentials.identifier);
     if (!placeholder) this.data.accounts.push(a);
     registerSecret(credentials.identifier); registerSecret(credentials.password);

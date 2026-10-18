@@ -4,6 +4,7 @@ import { readCache, writeCache, clearCache } from './cache';
 import { VerificationPrompt } from './VerificationPrompt';
 import { Settings } from './Settings';
 import { MyListings } from './MyListings';
+import { accountField, defaultCity } from '../server/required-info';
 
 async function api<T>(path: string, body?: unknown, method = 'GET', revision?: number): Promise<T> {
   const response = await fetch('/api' + path, { method, headers: { 'X-Linko-Request': '1', ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(revision === undefined ? {} : { 'If-Match': String(revision) }) }, body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body) });
@@ -20,7 +21,7 @@ export function App() {
   const [online, setOnline] = useState(navigator.onLine), [error, setError] = useState('');
   const [section, setSection] = useState<'New listing' | 'Drafts' | 'My listings' | 'Settings'>('New listing');
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [accounts, setAccounts] = useState<{ id: string; label: string; activeListings: number }[]>([]);
+  const [accounts, setAccounts] = useState<{ id: string; label: string; activeListings: number; defaults: { location: string; phone: string } }[]>([]);
   const [cfg, setCfg] = useState<{ publishEnabled: boolean; mode: string }>();
   const [refreshKey, setRefreshKey] = useState(0);
   const [categoryText, setCategoryText] = useState('');
@@ -43,6 +44,8 @@ export function App() {
       // Reloads resume that tab's draft; fresh navigation starts an independent one.
       const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
       if (navigator.onLine && navigation?.type === 'navigate') sessionStorage.removeItem('linko-draft');
+      const linkedId = /^#draft\/([a-f0-9-]+)$/.exec(window.location.hash)?.[1];
+      if (linkedId) sessionStorage.setItem('linko-draft', linkedId);
       const activeId = sessionStorage.getItem('linko-draft');
       const cached = activeId ? await readCache(activeId).catch(() => undefined) : undefined;
       if (cached) {
@@ -95,6 +98,14 @@ export function App() {
   function edit(key: keyof Draft, value: unknown) {
     if (!current.current || locked(current.current)) return;
     version.current++; show({ ...current.current, [key]: value }, true, key === 'category'); setSaveFailed(false);
+  }
+  const listingAccount = accounts.find(a => a.id === draft?.accountId);
+  async function saveDefault(field: 'location' | 'phone', value: string) {
+    if (!listingAccount) return;
+    await perform(async () => {
+      await api(`/settings/accounts/${listingAccount.id}/defaults`, { location: listingAccount.defaults?.location || defaultCity, phone: listingAccount.defaults?.phone || '', [field]: value }, 'PUT');
+      await refresh();
+    });
   }
   async function save(): Promise<Draft> {
     if (saving.current) { await saving.current; return dirtyRef.current ? save() : current.current!; }
@@ -165,16 +176,26 @@ export function App() {
           <label>Listing title<input value={draft?.title || ''} maxLength={120} onChange={e => edit('title', e.target.value)}/></label>
           <label>Asking price<div className="price-input"><input aria-label="Asking price" inputMode="decimal" value={draft?.price || ''} onChange={e => edit('price', e.target.value)}/><select aria-label="Currency" value={draft?.currency || 'GEL'} onChange={e => edit('currency', e.target.value)}><option value="GEL">₾ GEL</option><option value="USD">$ USD</option></select></div></label>
           <label>Description<textarea aria-label="Description" rows={4} maxLength={6000} value={draft?.description || ''} onChange={e => edit('description', e.target.value)}/></label>
-          <label>Listing account<select aria-label="Listing account" value={draft?.accountId || ''} onChange={e => edit('accountId', e.target.value)}><option value="" disabled>Choose account</option>{accounts.map(a => <option value={a.id} key={a.id}>{a.label} · {a.activeListings} of 5 used</option>)}</select></label>
+          <label>Listing account<select aria-label="Listing account" value={draft?.accountId || ''} onChange={e => { edit('location', accounts.find(a => a.id === e.target.value)?.defaults?.location || defaultCity); edit('accountId', e.target.value); }}><option value="" disabled>Choose account</option>{accounts.map(a => <option value={a.id} key={a.id}>{a.label} · {a.activeListings} of 5 used</option>)}</select></label>
+          <label className="listing-location">City<input maxLength={200} value={draft?.location || listingAccount?.defaults?.location || defaultCity} onChange={e => edit('location', e.target.value)}/></label>
           <div className="category-row"><label>Category path<input value={categoryText} onChange={e => { edit('category', e.target.value.split('>').map(s => s.trim()).filter(Boolean)); setCategoryText(e.target.value); }}/></label><button className="button ghost" disabled={disabled || !online || !basics} onClick={() => void action('analyze')}>Find category</button></div>
           {!!draft?.categoryCandidates?.length && <fieldset className="category-choices"><legend>Choose a category</legend>{draft.categoryCandidates.map(path => <button className="button ghost" key={path.join(' > ')} onClick={() => edit('category', path)}>{path.join(' › ')}</button>)}</fieldset>}
-          {!!draft?.questions.length && <div className="required-facts">{draft.questions.map(q => <label key={q.key}>{q.label}{q.options.length ? <select aria-label={q.label} value={draft.facts[q.key] || ''} onChange={e => edit('facts', { ...draft.facts, [q.key]: e.target.value })}><option value="">Choose</option>{q.options.map(o => <option key={o}>{o}</option>)}</select> : <input value={draft.facts[q.key] || ''} onChange={e => edit('facts', { ...draft.facts, [q.key]: e.target.value })}/>}</label>)}</div>}
+          {!!draft?.questions.length && <div className="required-facts" aria-label="Required information"><p>Needs info · answer below, then press Publish.</p>{draft.questions.map(q => {
+            const field = accountField(q), value = field === 'location' ? draft.location || listingAccount?.defaults?.location || defaultCity : field === 'phone' ? draft.facts[q.key] || draft.facts.phone || '' : draft.facts[q.key] || '';
+            const answer = (v: string) => {
+              if (field === 'location') edit('location', v);
+              else { const facts = { ...current.current!.facts, [field === 'phone' ? 'phone' : q.key]: v }; if (field === 'phone' && q.key !== 'phone') delete facts[q.key]; edit('facts', facts); }
+            };
+            return <div key={q.key}><label>{q.label}{q.options.length ? <select aria-label={q.label} value={value} onChange={e => answer(e.target.value)}><option value="">Choose</option>{q.options.map(o => <option key={o}>{o}</option>)}</select> : <input aria-label={q.label} type={field === 'phone' ? 'tel' : 'text'} value={value} placeholder={field === 'phone' && listingAccount?.defaults?.phone ? 'Saved account phone will be used' : ''} onChange={e => answer(e.target.value)}/>}</label>
+              {field && <button className="text-button" disabled={disabled || !online || !value.trim() || !listingAccount} onClick={() => void saveDefault(field, value)}>Save as account default {field === 'phone' ? 'phone' : 'city'}</button>}
+            </div>;
+          })}</div>}
         </fieldset>
         {(running(draft) || ['blocked', 'needs_input', 'unknown'].includes(draft?.state || '')) && <p role="status">{draft?.message}</p>}
         <div className="lean-publish"><span aria-live="polite">{dirty ? online ? 'Saving…' : 'Saved on this device' : 'Saved'}</span><div className="publish-action">{publishReason && <p id="publish-reason" aria-live="polite">{publishReason}{publishReason === 'Publishing is off' && <> — turn it on in <a href="#settings" onClick={e => { e.preventDefault(); setSection('Settings'); }}>Settings</a></>}</p>}<button className="button primary" disabled={!!publishReason} aria-describedby={publishReason ? 'publish-reason' : undefined} onClick={() => void action('publish')}>Publish</button></div></div>
       </section>}
       {section === 'Drafts' && <section className="panel lean-drafts" aria-label="Drafts">{!drafts.length && <p>No drafts</p>}{drafts.map(d => <article key={d.id}><div><strong>{d.title || 'Untitled'}</strong><small>{d.state === 'needs_input' ? 'Needs details' : d.state}</small></div><button className="text-button" disabled={!online || working} onClick={() => void open(d.id)}>Resume {d.title || 'Untitled'}</button><button className="text-button" disabled={!online || working} onClick={() => void perform(async () => { const saved = d.id === current.current?.id ? await save() : d; await api(`/drafts/${d.id}?revision=${saved.revision}`, undefined, 'DELETE'); if (current.current?.id === d.id) reset(await api<Draft>('/drafts', {}, 'POST')); })}>Delete {d.title || 'Untitled'}</button></article>)}</section>}
-      {section === 'My listings' && <MyListings online={online}/>}
+      {section === 'My listings' && <MyListings online={online} onOpen={id => void open(id)}/>}
       {section === 'Settings' && <Settings online={online} onSaved={() => { setRefreshKey(v => v + 1); }}/>}
     </main>
     {online && <VerificationPrompt/>}

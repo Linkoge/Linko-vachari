@@ -6,15 +6,21 @@ import { Store } from '../server/store';
 import { savePhoto } from '../server/photos';
 import { MarketplaceBrowser, allowedUrl, isAuthHost, onAuthPage } from '../server/browser';
 import { WorkflowError } from '../server/types';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { randomInt, randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { CredentialVault } from '../server/credentials';
+import { controls, privateControl } from '../server/replay';
 
 // Shapes below were observed on the live, signed-in mymarket.ge listing form (react-select dropdowns, `fast-option` rows,
 // button-styled radios tracked by an `active` class, an uploader that appends thumbnails named after the uploaded file).
 async function withPage<T>(run: (page: Page, adapter: MarketplaceBrowser, flow: Workflow) => Promise<T>) {
   const browser: Browser = await chromium.launch(); const page = await browser.newPage();
   const adapter = new MarketplaceBrowser(); adapter.page = page; const store = new Store(':memory:');
-  const flow = new Workflow(store, (async () => { throw new WorkflowError('CODEX', 'not used'); }) as never); flow.browser = adapter;
-  try { return await run(page, adapter, flow); } finally { await browser.close(); store.db.close(); }
+  const root = mkdtempSync(join(tmpdir(), 'linko-live-form-'));
+  const flow = new Workflow(store, (async () => { throw new WorkflowError('CODEX', 'not used'); }) as never, new CredentialVault(join(root, 'account.json'), false)); flow.browser = adapter;
+  try { return await run(page, adapter, flow); } finally { await browser.close(); store.db.close(); rmSync(root, { recursive: true, force: true }); }
 }
 
 test('single sign-on hops between Tinet auth hosts are navigable and counted as sign-in pages, look-alikes are not', () => {
@@ -87,5 +93,47 @@ test('photos upload one at a time in cover-first order and a scrambled gallery i
     await page.setContent(`<input id="f" type="file"><div id="g"><img alt="${ids[2]}.jpg" width="5" height="5" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></div><script>f.addEventListener('change',()=>{const i=new Image();i.alt=f.files[0].name;i.width=5;i.height=5;i.src='data:image/gif;base64,R0lGODlhAQABAAAAACw=';g.append(i)})</script>`);
     // A gallery that already holds a later photo ahead of the cover (as if MyMarket reordered them) must stop the run before review.
     await assert.rejects(flow.uploadInOrder(page, page.locator('#f'), ids), /different order/);
+  });
+});
+
+test('account defaults fill required city/mobile, allow listing city overrides and preserve a profile phone', async () => {
+  await withPage(async (page, adapter, flow) => {
+    const previous = flow.accounts.defaults('legacy'), phone = '5' + randomInt(10_000_000, 99_999_999);
+    const cityLabel = 'ქალაქი/ზუსტი მდებარეობა *', mobileLabel = 'მობილურის ნომერი *';
+    assert.equal(flow.accounts.add({ label: 'Primary', identifier: 'first@x.io', password: randomUUID() }), 'legacy');
+    flow.accounts.saveDefaults('legacy', { location: 'თბილისი', phone });
+    const other = flow.accounts.add({ label: 'Other', identifier: 'other@x.io', password: randomUUID() });
+    flow.accounts.saveDefaults(other, { location: 'ბათუმი', phone: '5' + randomInt(10_000_000, 99_999_999) });
+    assert.equal(flow.accounts.defaultId, other); // Last-used account must not supply this listing's contact data.
+    const draft = flow.store.create('legacy'); draft.automation = { steps: [] };
+    const prompts: string[] = [];
+    flow.decide = async (_schema, _instructions, input) => { prompts.push(input); return { action: 'done', questions: [] } as never; };
+    try {
+      await page.setContent(`<label>${cityLabel}<select required><option value="">Choose</option><option value="14">თბილისი</option><option value="96">ბათუმი</option></select></label><label>${mobileLabel}<input type="tel" required></label>`);
+      assert.ok(await flow.agent(page, draft, 'prepare', '', 8));
+      assert.equal(await page.getByLabel(cityLabel).inputValue(), '14');
+      assert.equal(await page.getByLabel(mobileLabel).inputValue(), phone);
+      const snap = await adapter.snapshot();
+      assert.equal(snap.elements.find(e => e.label === mobileLabel)?.value, '');
+      assert.equal(privateControl(snap.elements.find(e => e.label === mobileLabel)!), true);
+      assert.equal(JSON.stringify(controls(snap)).includes(mobileLabel), false);
+      assert.equal(prompts.some(p => p.includes(phone)), false);
+      draft.location = 'ბათუმი';
+      assert.ok(await flow.agent(page, draft, 'prepare', '', 8));
+      assert.equal(await page.getByLabel(cityLabel).inputValue(), '96');
+      assert.equal(flow.accounts.defaults('legacy').location, 'თბილისი');
+      const profileNumber = '5' + randomInt(10_000_000, 99_999_999);
+      await page.getByLabel(mobileLabel).fill(profileNumber);
+      flow.accounts.saveDefaults('legacy', { location: 'თბილისი', phone: '' });
+      assert.ok(await flow.agent(page, draft, 'prepare', '', 8));
+      assert.equal(await page.getByLabel(mobileLabel).inputValue(), profileNumber);
+      await page.getByLabel(mobileLabel).fill('');
+      assert.equal(await flow.agent(page, draft, 'prepare', '', 8), null);
+      assert.equal(draft.state, 'needs_input'); assert.equal(draft.questions[0].label, mobileLabel);
+      draft.facts[draft.questions[0].key] = phone;
+      assert.ok(await flow.agent(page, draft, 'prepare', '', 8));
+      assert.equal(await page.getByLabel(mobileLabel).inputValue(), phone);
+      assert.equal(prompts.some(p => p.includes(phone)), false);
+    } finally { flow.accounts.saveDefaults('legacy', previous); }
   });
 });
