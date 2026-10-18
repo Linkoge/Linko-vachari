@@ -18,8 +18,8 @@ export class Store {
     return row ? JSON.parse(row.data) : [];
   }
   learn(id: string, steps: import('./replay').SavedStep[]) { this.db.prepare('INSERT OR REPLACE INTO learned_steps VALUES (?,?)').run(id, JSON.stringify(steps)); }
-  create() {
-    const d: Draft = { id: randomUUID(), revision: 0, state: 'draft', title: '', description: '', price: '', currency: 'GEL', model: '', condition: '', location: '', facts: {}, photos: [], coverId: '', category: [], comparables: [], questions: [], fields: [], message: 'Add your photos and a few details to begin.', events: [] };
+  create(accountId?: string) {
+    const d: Draft = { accountId, id: randomUUID(), revision: 0, state: 'draft', title: '', description: '', price: '', currency: 'GEL', model: '', condition: '', location: '', facts: {}, photos: [], coverId: '', category: [], comparables: [], questions: [], fields: [], message: 'Add your photos and a few details to begin.', events: [] };
     this.save(d); return d;
   }
   get(id: string): Draft {
@@ -43,7 +43,7 @@ export class Store {
   fingerprint(d: Draft) {
     // Covers content across draft IDs and file names; photo bytes are canonical, EXIF-free JPEGs.
     const photos = d.photos.map(p => createHash('sha256').update(readFileSync(join(privateDir, 'photos', p.id + '.jpg'))).digest('hex')).sort();
-    return createHash('sha256').update(JSON.stringify({ title: d.title.trim(), description: d.description.trim(), price: Number(d.price), currency: d.currency, model: d.model, photos })).digest('hex');
+    return createHash('sha256').update(JSON.stringify({ ...(d.accountId && d.accountId !== 'legacy' ? { accountId: d.accountId } : {}), title: d.title.trim(), description: d.description.trim(), price: Number(d.price), currency: d.currency, model: d.model, photos })).digest('hex');
   }
   claim(d: Draft) {
     let fp = this.fingerprint(d);

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
-test('assistant window: saves credentials privately, prompts for the code and sends it back, offers the browser only as a fallback', async ({ page }) => {
+test('assistant window: saves credentials privately, prompts for the code and sends it back, retains the in-app code prompt', async ({ page }) => {
   const calls: { path: string; method: string; body: unknown }[] = [];
-  let status: any = { state: 'idle', messages: [], awaiting: null, credentials: { configured: false, hint: '', source: 'none' }, signedInAt: null, sessionReused: false, working: false, fallbackAvailable: true };
+  let status: any = { state: 'idle', messages: [], awaiting: null, credentials: { configured: false, hint: '', source: 'none' }, signedInAt: null, sessionReused: false, working: false, fallbackAvailable: false };
   await page.route('**/api/agent**', async route => {
     const request = route.request(); const path = new URL(request.url()).pathname.replace('/api/agent', '') || '/';
     if (request.method() !== 'GET') calls.push({ path, method: request.method(), body: request.postDataJSON() });
@@ -26,5 +26,5 @@ test('assistant window: saves credentials privately, prompts for the code and se
   expect(calls.at(-1)).toEqual({ path: '/message', method: 'POST', body: { text: '482913' } });
   expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]).includes('fake-pass'))).toBe(false);
   await expect(window.getByRole('button', { name: 'Open private browser (fallback)' })).toHaveCount(0);
-  status = { ...status, state: 'manual', fallbackAvailable: true }; await expect(window.getByRole('button', { name: 'Open private browser (fallback)' })).toBeVisible({ timeout: 5000 });
+  status = { ...status, state: 'failed' }; await expect(window.getByRole('button', { name: 'Open private browser (fallback)' })).toHaveCount(0);
 });

@@ -1,29 +1,19 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-test('protected panel sign-in is distinct from marketplace login; private browser controls and sign-out do not retain typed secrets', async ({ page }) => {
-  let signedIn = false; const controls: unknown[] = [];
+import { randomUUID } from 'node:crypto';
+test('protected panel sign-in is distinct from marketplace login; automatic account sign-in and panel sign-out stay separate', async ({ page }) => {
+  let signedIn = false; const panelCode = randomUUID();
   await page.route('**/api/auth/status', r => r.fulfill({ json: { signedIn, protected: true, configured: true, tailnet: true } }));
-  await page.route('**/api/auth/login', r => { signedIn = r.request().postDataJSON().password === 'test-panel-passphrase'; return r.fulfill({ status: signedIn ? 200 : 401, json: signedIn ? { signedIn: true } : { message: 'The panel password was not accepted.' } }); });
+  await page.route('**/api/auth/login', r => { signedIn = r.request().postDataJSON().password === panelCode; return r.fulfill({ status: signedIn ? 200 : 401, json: signedIn ? { signedIn: true } : { message: 'The panel password was not accepted.' } }); });
   await page.route('**/api/config', r => r.fulfill({ json: { codex: { available: true, chatgptSignedIn: true }, publishEnabled: false, mode: 'tailnet', publicOrigin: 'https://owner-node.test-tailnet.ts.net:8443', browser: { active: false, owned: false } } }));
-  await page.route('**/api/browser/start', r => r.fulfill({ json: { active: true, owned: true } }));
-  await page.route('**/api/browser/frame', r => r.fulfill({ contentType: 'image/png', body: readFileSync('public/icons/icon-512.png'), headers: { 'Cache-Control': 'no-store' } }));
-  await page.route('**/api/browser/control', r => { controls.push(r.request().postDataJSON()); return r.fulfill({ json: { accepted: true } }); });
-  await page.route('**/api/browser/finish', r => r.fulfill({ json: { active: false, loginVerified: false } }));
   await page.goto('/'); await expect(page.getByRole('heading', { name: 'Sign in to Linko' })).toBeVisible();
-  await page.getByLabel('Panel password').fill('test-panel-passphrase'); await page.getByRole('button', { name: 'Sign in to panel' }).click();
+  await page.getByLabel('Panel password').fill(panelCode); await page.getByRole('button', { name: 'Sign in to panel' }).click();
   await expect(page.getByRole('heading', { name: 'Sell something good.' })).toBeVisible();
   await page.getByRole('button', { name: 'Connection & setup' }).click();
   await expect(page.getByRole('dialog')).toContainText('MyMarket login is separate');
   await expect(page.getByRole('dialog')).toContainText('No provider key');
-  await page.getByRole('button', { name: 'Open private MyMarket browser' }).click();
-  const frame = page.getByAltText('Live private MyMarket browser'); await expect(frame).toBeVisible();
-  await frame.click({ position: { x: 50, y: 50 } });
-  const field = page.getByLabel('Text for selected marketplace field'); await expect(field).toHaveAttribute('type', 'password');
-  await field.fill('fixture-only'); await page.getByRole('button', { name: 'Send text' }).click(); await expect(field).toHaveValue('');
-  await page.getByRole('button', { name: 'Enter', exact: true }).click();
-  expect(controls).toContainEqual({ type: 'text', text: 'fixture-only' }); expect(controls).toContainEqual({ type: 'key', key: 'Enter' });
-  await page.getByRole('button', { name: 'Finish login & return' }).click(); await expect(page.getByRole('dialog')).not.toBeVisible();
-  await page.getByRole('button', { name: 'Connection & setup' }).click(); await page.getByRole('button', { name: 'Sign out of Linko panel' }).click();
+  await expect(page.getByRole('dialog')).toContainText('signs in automatically');
+  await expect(page.getByRole('button', { name: 'Open private MyMarket browser' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Sign out of Linko panel' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in to Linko' })).toBeVisible();
-  expect(await page.evaluate(() => Object.values(localStorage).join(' ').includes('fixture-only'))).toBe(false);
+  expect(await page.evaluate(value => Object.values(localStorage).join(' ').includes(value), panelCode)).toBe(false);
 });

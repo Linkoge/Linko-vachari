@@ -9,12 +9,12 @@ export type Credentials = z.infer<typeof credentialsSchema>;
 // They are never returned by the API, written to the draft journal, sent to Codex or bundled into the client.
 export class CredentialVault {
   private value?: Credentials; private source: 'file' | 'environment' | 'none' = 'none';
-  constructor(public file = join(privateDir, 'mymarket-account.json')) { this.load(); }
+  constructor(public file = join(privateDir, 'mymarket-account.json'), private useEnvironment = true) { this.load(); }
   private load() {
     try { this.value = credentialsSchema.parse(JSON.parse(readFileSync(this.file, 'utf8'))); this.source = 'file'; }
     catch {
       const { MYMARKET_PHONE: identifier, MYMARKET_PASSWORD: password } = process.env;
-      const env = credentialsSchema.safeParse({ identifier, password });
+      const env = credentialsSchema.safeParse(this.useEnvironment ? { identifier, password } : {});
       if (env.success) { this.value = env.data; this.source = 'environment'; } else { this.value = undefined; this.source = 'none'; }
     }
     if (this.value) { registerSecret(this.value.identifier); registerSecret(this.value.password); }

@@ -39,12 +39,19 @@ const overlayButtons = [/^ვეთანხმები ყველას$/, /
 export class MarketplaceBrowser {
   context?: BrowserContext; page?: Page;
   display = new PrivateDisplay();
+  accountId = 'legacy';
+  profilePath() { return this.accountId === 'legacy' ? join(privateDir, 'browser') : join(privateDir, 'browsers', this.accountId); }
+  async useAccount(id: string) {
+    if (!/^(legacy|[a-f0-9-]{36})$/.test(id)) throw new WorkflowError('ACCOUNT', 'Invalid account profile.');
+    if (id === this.accountId) return;
+    await this.close(); this.accountId = id;
+  }
   async open(headless = config.headless) {
     if (this.page && !this.page.isClosed()) return this.page;
     const display = headless ? '' : await this.display.open();
     // A persistent real-Chromium profile, headed on the private display, with the automation markers removed.
     // Observed live: Cloudflare rejects the default HeadlessChrome user agent (403) but admits a normal headed profile.
-    this.context = await chromium.launchPersistentContext(join(privateDir, 'browser'), { headless, viewport: { width: 1360, height: 900 }, locale: 'ka-GE', env: browserEnvironment(display), args: ['--disable-blink-features=AutomationControlled'], ignoreDefaultArgs: ['--enable-automation'] });
+    this.context = await chromium.launchPersistentContext(this.profilePath(), { headless, viewport: { width: 1360, height: 900 }, locale: 'ka-GE', env: browserEnvironment(display), args: ['--disable-blink-features=AutomationControlled'], ignoreDefaultArgs: ['--enable-automation'] });
     // Disallow model-directed external navigation; normal asset requests are unaffected.
     await this.context.route('**/*', async route => {
       const r = route.request();
@@ -78,7 +85,7 @@ export class MarketplaceBrowser {
   async go(url: string, page?: Page) {
     page ||= await this.open();
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-    if (!await this.settle(page)) throw new WorkflowError('CHALLENGE', 'MyMarket is showing a Cloudflare security check that the assistant could not pass on its own. Open the private browser from the assistant window as a fallback, complete the check, then try again.');
+    if (!await this.settle(page)) throw new WorkflowError('CHALLENGE', 'MyMarket is showing a Cloudflare security check that the assistant could not pass on its own. Retry after the security check clears.');
     await page.waitForLoadState('load', { timeout: 15_000 }).catch(() => {});
     await this.dismissOverlays(page); return page;
   }
@@ -128,7 +135,7 @@ export class MarketplaceBrowser {
     snapshot.elements.forEach(e => { e.label = redact(e.label); e.group = redact(e.group || ''); e.value = redact(e.value); e.href = safeUrl(e.href); e.options = e.options.map(redact); });
     snapshot.images.forEach(i => { i.alt = redact(i.alt); i.src = safeUrl(i.src); });
     // Only the interstitial's own title/opening text counts: real pages carry a footer "protected by reCAPTCHA" notice.
-    if (this.isChallengePage(snapshot.title, snapshot.text.slice(0, 800))) throw new WorkflowError('CHALLENGE', 'MyMarket is showing a browser security check. The assistant waits for these to clear; if it persists, use the private browser fallback in the assistant window, then retry.');
+    if (this.isChallengePage(snapshot.title, snapshot.text.slice(0, 800))) throw new WorkflowError('CHALLENGE', 'MyMarket is showing a browser security check. The assistant waits for these to clear; if it persists, retry after the check clears.');
     return snapshot;
   }
   async close() { await this.context?.close(); this.context = undefined; this.page = undefined; this.display.close(); }

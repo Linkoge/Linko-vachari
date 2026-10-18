@@ -12,7 +12,7 @@ export function sourceValue(d: Draft, source: string, query: string) {
   return '';
 }
 export function guardClick(e: ElementInfo, phase: 'search' | 'prepare', category: string[], facts: string[]) {
-  if (dangerousLabel.test(e.label) || e.type === 'password' || /login|sign in|შესვლა|ავტორიზაცია/i.test(e.label)) throw new WorkflowError('POLICY', 'This step needs manual login or a publishing decision. Open the local login browser to continue.');
+  if (dangerousLabel.test(e.label) || e.type === 'password' || /login|sign in|შესვლა|ავტორიზაცია/i.test(e.label)) throw new WorkflowError('POLICY', 'This control requires the sign-in assistant or an explicit owner decision.');
   if (e.tag === 'a' && e.href && phase === 'search' && /^\/(?:en\/|ka\/|ru\/)?(?:pr\/|product\/|products\/|search\/)/.test(new URL(e.href).pathname)) return;
   const exactOption = [...category, ...facts].filter(Boolean).some(v => v.trim().toLocaleLowerCase() === e.label.trim().toLocaleLowerCase());
   if (!navigationLabel.test(e.label) && !exactOption && !['combobox', 'tab'].includes(e.role) && !['select', 'input'].includes(e.tag)) throw new WorkflowError('POLICY', 'An unfamiliar marketplace control needs inspection. The app stopped before taking an uncertain action.');

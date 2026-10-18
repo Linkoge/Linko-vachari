@@ -17,7 +17,7 @@ test('semantic snapshots keep private field presence without values and recogniz
     assert.equal(phone.value, ''); assert.equal(phone.hasValue, true); assert.equal(phone.required, true);
     assert.equal(snapshot.elements.find(e => e.type === 'password')?.value, ''); assert.equal(snapshot.elements.find(e => e.tag === 'select')?.label, 'Category');
     await page.setContent('<title>Just a moment...</title><p>Performing security verification</p>');
-    await assert.rejects(adapter.snapshot(), /private browser fallback/);
+    await assert.rejects(adapter.snapshot(), /security check/);
   } finally { await browser.close(); }
 });
 test('connected semantic workflow: comparables, new live required field, review, guarded submit, durable receipt, stale form and unknown-response recovery', { timeout: 180000 }, async () => {
@@ -40,7 +40,7 @@ test('connected semantic workflow: comparables, new live required field, review,
   const brain: typeof ask = (async (_schema: unknown, instructions: string, input: string, slot = 'everyday') => {
     aiSlots.push(slot);
     const v = JSON.parse(input);
-    if (instructions.startsWith('Suggest')) return { title: 'Studio lamp with stand', query: 'Studio lamp' };
+    if (instructions.startsWith('Suggest')) return { title: 'Studio lamp with stand', query: 'Studio lamp', queries: ['Studio lamp', 'Photography lighting', 'Lamp with stand'] };
     if (instructions.startsWith('Choose one')) return { urls: v.links.map((e: any) => e.href).filter((url: string) => url.includes('/pr/')) };
     if (instructions.startsWith('Inspect this')) return { relevant: true, title: 'Studio lamp', breadcrumbs: ['Home', 'Lighting', 'Studio lamps'] };
     if (instructions.startsWith('Choose the best')) return { index: 0, confident: true };

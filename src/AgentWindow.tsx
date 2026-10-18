@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 interface AgentStatus {
-  state: 'idle' | 'working' | 'awaiting_credentials' | 'awaiting_code' | 'signed_in' | 'failed' | 'manual';
+  state: 'idle' | 'working' | 'awaiting_credentials' | 'awaiting_code' | 'signed_in' | 'failed';
   messages: { id: number; role: 'agent' | 'owner'; text: string; at: string }[];
   awaiting: 'code' | 'credentials' | null; credentials: { configured: boolean; hint: string; source: string };
-  signedInAt: string | null; sessionReused: boolean; working: boolean; fallbackAvailable: boolean;
+  signedInAt: string | null; sessionReused: boolean; working: boolean;
 }
-const labels: Record<AgentStatus['state'], string> = { idle: 'Not signed in yet', working: 'Working in the browser…', awaiting_credentials: 'Needs your MyMarket details', awaiting_code: 'Waiting for your code', signed_in: 'Signed in to MyMarket', failed: 'Needs attention', manual: 'Needs attention' };
+const labels: Record<AgentStatus['state'], string> = { idle: 'Not signed in yet', working: 'Working in the browser…', awaiting_credentials: 'Needs your MyMarket details', awaiting_code: 'Waiting for your code', signed_in: 'Signed in to MyMarket', failed: 'Needs attention' };
 async function call(path: string, method = 'GET', body?: unknown): Promise<AgentStatus> {
   const r = await fetch('/api/agent' + path, { method, headers: { 'Content-Type': 'application/json', 'X-Linko-Request': '1' }, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' });
   if (r.status === 401) window.dispatchEvent(new Event('linko-signed-out'));
   const data = await r.json(); if (!r.ok) throw new Error(data.message || 'The assistant could not do that.'); return data;
 }
-export function AgentWindow({ onOpenBrowser, disabled }: { onOpenBrowser: () => void; disabled: boolean }) {
+export function AgentWindow({ disabled }: { disabled: boolean }) {
   const [status, setStatus] = useState<AgentStatus>(); const [open, setOpen] = useState(false); const [error, setError] = useState('');
   const [text, setText] = useState(''); const [identifier, setIdentifier] = useState(''); const [password, setPassword] = useState(''); const [editing, setEditing] = useState(false); const [busy, setBusy] = useState(false);
   const log = useRef<HTMLDivElement>(null);
@@ -30,7 +30,7 @@ export function AgentWindow({ onOpenBrowser, disabled }: { onOpenBrowser: () => 
     <button className="agent-toggle" onClick={() => setOpen(!open)} aria-expanded={open}><span className={'agent-dot ' + (status?.awaiting ? 'attention' : status?.state === 'signed_in' ? 'ok' : '')}/>{open ? 'Hide assistant' : 'Assistant'}<small>{status ? labels[status.state] : 'Connecting…'}</small></button>
     {open && <div className="agent-window">
       <div className="agent-log" ref={log} role="log" aria-live="polite">
-        {!status?.messages.length && <p className="agent-empty">Hi! I sign in to MyMarket for you. Add your details once, then say “sign in”. If MyMarket texts you a code, type it here.</p>}
+        {!status?.messages.length && <p className="agent-empty">Hi! I sign in to MyMarket for you. Save accounts in Settings; listing runs sign in automatically. If MyMarket texts you a code, type it here.</p>}
         {status?.messages.map(m => <div key={m.id} className={'agent-message ' + m.role}>{m.text}</div>)}
       </div>
       {error && <div className="notice error" role="alert">{error}</div>}
@@ -48,7 +48,6 @@ export function AgentWindow({ onOpenBrowser, disabled }: { onOpenBrowser: () => 
         <button className="button ghost small" disabled={busy || disabled || !status || status.working || !status.credentials.configured} onClick={() => void act('/login', 'POST', {})}>{status?.state === 'signed_in' ? 'Check session' : 'Sign in to MyMarket'}</button>
         {status?.credentials.configured && !needsForm && <button className="text-button" onClick={() => setEditing(true)}>Change details ({status.credentials.hint})</button>}
         {status?.credentials.configured && status.credentials.source === 'file' && <button className="text-button" disabled={busy || status.working} onClick={() => { if (confirm('Remove your saved MyMarket details from this server?')) void act('/credentials', 'DELETE'); }}>Remove saved details</button>}
-        {status?.fallbackAvailable && (status.state === 'failed' || status.state === 'manual') && <button className="text-button" onClick={onOpenBrowser}>Open private browser (fallback)</button>}
       </div>
     </div>}
   </aside>;

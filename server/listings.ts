@@ -19,7 +19,7 @@ const literal = (value: unknown) => JSON.stringify(value).replace(/`/g, '\\u0060
 export function listingMarkdown(r: ListingRecord) {
   const d = r.recipe;
   return `# MyMarket listing record\n\n` +
-    `Draft: ${d.id}\n\nStatus: ${r.status}\n\nMonitoring: ${r.enabled ? 'enabled' : 'paused'}\n\n` +
+    `Account: ${d.accountId || 'legacy'}\n\nCategory method: ${d.categoryMethod || 'comparable-search'}\n\nDraft: ${d.id}\n\nStatus: ${r.status}\n\nMonitoring: ${r.enabled ? 'enabled' : 'paused'}\n\n` +
     `Receipt: ${literal(r.receipt || null)}\n\nReplacement draft: ${r.replacementId || 'none'}\n\n` +
     `Last check: ${r.checkedAt ? new Date(r.checkedAt).toISOString() : 'not checked'}\n\n${r.message}\n\n` +
     `## Category / section\n\n${literal(d.category)}\n\n` +
@@ -104,15 +104,20 @@ export class ListingMonitor {
     void this.check().catch(() => {});
   }
   stop() { if (this.timer) clearInterval(this.timer); }
-  async inspect(r: ListingRecord): Promise<Availability> {
+  async inspect(r: ListingRecord, retried = false): Promise<Availability> {
     if (!r.receipt || !isListingUrl(r.receipt.url)) return 'unavailable';
+    await this.workflow.useAccount(r.recipe);
     const browser = this.workflow.browser; await browser.open();
     const page = await browser.context!.newPage();
     try {
       await page.setExtraHTTPHeaders({ 'Cache-Control': 'no-cache', Pragma: 'no-cache' });
       const response = await page.goto(r.receipt.url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
       const text = await page.locator('body').innerText({ timeout: 5000 });
-      if (!response || browser.isChallengePage(await page.title(), text.slice(0, 800)) || onAuthPage(page.url()) || await page.locator('input[type="password"]:visible').count()) return 'unavailable';
+      if (onAuthPage(page.url()) || await page.locator('input[type="password"]:visible').count()) {
+        if (retried || !this.workflow.auth.vault.configured) return 'unavailable';
+        await page.close(); await this.workflow.auth.ensureSignedIn(); return this.inspect(r, true);
+      }
+      if (!response || browser.isChallengePage(await page.title(), text.slice(0, 800))) return 'unavailable';
       // Redirects to home/login/search and 200 error shells are inconclusive, never evidence of deletion.
       if (page.url().split('?')[0].replace(/\/$/, '') !== r.receipt.url.split('?')[0].replace(/\/$/, '')) return 'unavailable';
       if ([404, 410].includes(response.status())) {
@@ -131,7 +136,7 @@ export class ListingMonitor {
   }
   async check(now = Date.now()) {
     const flow = this.workflow;
-    if (flow.busy || flow.manualActive) return;
+    if (flow.busy) return;
     if (flow.prepared && Date.now() - flow.prepared.at > 10 * 60_000) flow.prepared = undefined;
     if (flow.prepared) return;
     flow.busy = true;
@@ -171,6 +176,7 @@ export class ListingMonitor {
     r.replacementId = d.id; r.status = 'relisting'; r.message = 'Confirmed missing twice; preparing one replacement from the saved recipe.';
     this.archive.store.save(d); this.archive.write(r);
     try {
+      await flow.useAccount(d);
       // A missing/corrupt photo must fail before preparation or submission.
       if (this.archive.store.fingerprint(d) !== r.fingerprint) throw new WorkflowError('PHOTO', 'The saved content or photos changed.');
       await flow.prepare(d);

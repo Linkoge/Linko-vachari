@@ -83,8 +83,8 @@ test('network/challenge uncertainty resets deletion evidence; pause and publish 
     config.autoRelist = true; f.flow.archive.pause(f.d.id, false); const count = probes;
     await monitor.check(now + CHECK_INTERVAL * 4); assert.equal(probes, count);
     f.flow.archive.pause(f.d.id, true); assert.equal(f.flow.archive.get(f.d.id).missingCount, 0);
-    f.flow.manualActive = true; await monitor.check(now + CHECK_INTERVAL * 5); assert.equal(probes, count);
-    f.flow.manualActive = false; f.flow.prepared = { id: f.d.id, revision: 0, hash: '', button: '', at: Date.now() };
+    f.flow.busy = true; await monitor.check(now + CHECK_INTERVAL * 5); assert.equal(probes, count);
+    f.flow.busy = false; f.flow.prepared = { id: f.d.id, revision: 0, hash: '', button: '', at: Date.now() };
     await monitor.check(now + CHECK_INTERVAL * 5); assert.equal(probes, count);
   } finally { [config.publish, config.autoRelist] = previous; f.cleanup(); }
 });

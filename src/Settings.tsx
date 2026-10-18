@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SettingsData, AIChoice, AISlot } from '../server/settings';
+import { AccountsSettings } from './AccountsSettings';
 import { AIPicker } from './AIPicker';
 type Data = { ai: SettingsData['ai']; telegram: { configured: boolean; chatId: string }; providers: Record<AIChoice['provider'], { installed: boolean; signedIn: boolean; message: string }> };
 async function request(path: string, body?: unknown, method = 'POST') {
@@ -12,6 +13,13 @@ export function Settings({ online, onSaved }: { online: boolean; onSaved: () => 
   const [busy, setBusy] = useState(false), [message, setMessage] = useState(''), [error, setError] = useState('');
   const [aiStatus, setAiStatus] = useState('Loading settings');
   const saving = useRef(false);
+  const restoreFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (busy) return;
+    const focused = restoreFocus.current; restoreFocus.current = null;
+    // Restore after the enabled controls have committed; a frame scheduled in finally can run while the fieldset is still disabled.
+    if (focused?.isConnected && (document.activeElement === document.body || document.activeElement === focused)) focused.focus({ preventScroll: true });
+  }, [busy]);
   async function load() { const d = await request(''); setData(d); setChatId(d.telegram.chatId); setAiStatus('Saved choices'); }
   useEffect(() => { if (online) void load().catch(e => { setData(undefined); setAiStatus('Settings unavailable'); setError(e.message); }); }, [online]);
   async function act(fn: () => Promise<void>) { setBusy(true); setError(''); setMessage(''); try { await fn(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
@@ -30,8 +38,7 @@ export function Settings({ online, onSaved }: { online: boolean; onSaved: () => 
       catch { setData(undefined); setAiStatus('Settings unavailable. Reconnect or retry to load saved choices.'); }
       return false;
     } finally {
-      saving.current = false; setBusy(false);
-      requestAnimationFrame(() => { if (focused?.isConnected && (document.activeElement === document.body || document.activeElement === focused)) focused.focus({ preventScroll: true }); });
+      restoreFocus.current = focused; saving.current = false; setBusy(false);
     }
   }
   return <div className="connection-settings">
@@ -43,7 +50,7 @@ export function Settings({ online, onSaved }: { online: boolean; onSaved: () => 
     </div>
     {!data && <button className="button ghost" disabled={busy || !online} onClick={() => void act(load)}>Retry settings</button>}
     {error && <p role="alert">{error}</p>}
-    <h3>Telegram</h3>
+    <AccountsSettings online={online} onSaved={onSaved}/><h3>Telegram</h3>
     <ol><li>Open Telegram, talk to <strong>@BotFather</strong>, use /newbot and copy the bot token below.</li><li>Open your new bot and press <strong>Start</strong>.</li><li>Save the token, then use <strong>Detect chat ID</strong> (getUpdates), choose your private chat and save again. Send a test message.</li></ol>
     <label>Bot token<input type="password" autoComplete="new-password" value={token} onChange={e => setToken(e.target.value)} placeholder={data?.telegram.configured ? 'Saved privately; leave blank to keep' : 'Paste bot token'} disabled={busy || !online}/></label>
     <label>Chat ID<input inputMode="text" value={chatId} onChange={e => setChatId(e.target.value)} disabled={busy || !online}/></label>

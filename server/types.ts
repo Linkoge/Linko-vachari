@@ -4,6 +4,7 @@ export interface Comparable { url: string; title: string; breadcrumbs: string[] 
 export interface Question { key: string; label: string; options: string[] }
 export interface FieldReview { label: string; value: string; source: string }
 export interface Draft {
+  accountId?: string; categoryMethod?: 'tree' | 'comparable-search' | 'owner'; categoryCandidates?: string[][];
   id: string; revision: number; state: State; title: string; description: string;
   price: string; currency: string; model: string; condition: string; location: string;
   facts: Record<string, string>; photos: Photo[]; coverId: string;

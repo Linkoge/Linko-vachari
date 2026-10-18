@@ -62,7 +62,7 @@ test('a wrong code is re-requested and a rejected password fails with a form pro
     assert.match(bad.agent.messages.at(-1)!.text, /did not accept that phone\/email and password/);
     assert.equal(bad.fixture.logins.length, 1, 'no automatic retry that could lock the account');
     await until(() => !bad.flow.busy);
-    assert.equal(bad.agent.status().fallbackAvailable, true);
+    assert.equal(bad.agent.status().state, 'failed');
   } finally { await bad.close(); }
 });
 
@@ -115,7 +115,7 @@ test('Cloudflare interstitials are waited out, overlays dismissed, and a persist
     await context.unroute('https://mymarket.ge/**');
     await context.route('https://mymarket.ge/**', route => route.fulfill({ status: 403, contentType: 'text/html; charset=utf-8', body: '<title>Just a moment...</title><p>Performing security verification</p>' }));
     await page.goto('https://mymarket.ge/'); assert.equal(await adapter.settle(page, 1500), false);
-    await assert.rejects(adapter.go('https://mymarket.ge/', page), (e: WorkflowError) => e.code === 'CHALLENGE' && /private browser/.test(e.message));
+    await assert.rejects(adapter.go('https://mymarket.ge/', page), (e: WorkflowError) => e.code === 'CHALLENGE' && /security check/.test(e.message));
   } finally { await browser.close(); }
 });
 
@@ -223,5 +223,24 @@ test('sign-in follows the single-sign-on hop through the platform auth host befo
     t.agent.login(); await until(() => t.agent.state === 'signed_in'); await until(() => !t.flow.busy);
     assert.equal(t.fixture.signedIn, true); assert.match(new URL(t.page.url()).hostname, /^mymarket\.ge$/);
     assert.ok(!everything(t.agent).includes(PASSWORD));
+  } finally { await t.close(); }
+});
+
+test('a login form encountered during search or preparation signs in automatically before the model observes the page', { timeout: 90_000 }, async () => {
+  const t = await setup({ password: PASSWORD });
+  try {
+    let observations = 0;
+    t.flow.brain = (async (_schema, _instructions, input) => {
+      observations++; const data = JSON.parse(input);
+      assert.equal(data.page.elements.some((e: { type: string }) => e.type === 'password'), false);
+      return { action: 'done', target: '', source: '', value: '', questions: [], reason: 'signed in' };
+    }) as typeof t.flow.brain;
+    for (const phase of ['search', 'prepare'] as const) {
+      t.fixture.signedIn = false; await t.page.goto('https://auth.tnet.ge/ka/user/login/');
+      await t.flow.agent(t.page, t.store.create(), phase, 'lamp', 3);
+      assert.equal(t.fixture.signedIn, true);
+    }
+    assert.equal(observations, 2); assert.equal(t.fixture.logins.length, 2);
+    assert.equal('manualActive' in t.flow, false);
   } finally { await t.close(); }
 });

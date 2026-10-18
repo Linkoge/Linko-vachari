@@ -13,7 +13,7 @@ const privatePaths = [
   'credentials.json', 'nested/service-credentials.json', 'credentials.json.bak',
   'cookies.json', 'browser-cookies.txt', 'access-token.json', 'refresh-token.yaml',
   'session.yml', 'sessions.json', 'client-secret.json', 'storage-state.json', 'storage_state.json',
-  'mymarket-account.json', 'auth.json', '.private/access.json', '.private/browser/Default/Cookies',
+  'mymarket-account.json', 'mymarket-accounts.json', 'auth.json', '.private/access.json', '.private/browser/Default/Cookies',
   'nested/credentials/account', 'cookies/account', 'tokens/account', 'sessions/account', 'secrets/account',
   '.ssh/id_ed25519', '.aws/credentials', '.netrc', '.npmrc', '.git-credentials', 'id_rsa', 'Cookies', 'Login Data', 'Local State',
   'auth', 'credential', 'cookie', 'token', 'session', 'secret',

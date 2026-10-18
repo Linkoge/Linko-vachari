@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import multer from 'multer';
 import { z } from 'zod';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, unlinkSync } from 'node:fs';
 import { Store } from './store';
 import { Workflow } from './workflow';
@@ -10,29 +11,49 @@ import { privateDir, config } from './config';
 import { savePhoto } from './photos';
 import { WorkflowError } from './types';
 import { AccessBoundary } from './access';
-import { ManualBrowser } from './manual-browser';
 import { providerStatus } from './codex';
+import { addAccountSchema } from './accounts';
 import { aiSchema } from './settings';
 import { ListingMonitor } from './listings';
-const patchSchema = z.object({ revision: z.number().int(), title: z.string().max(120), description: z.string().max(6000), price: z.string().regex(/^(?:\d{0,8})(?:\.\d{0,2})?$/), currency: z.enum(['GEL', 'USD']), model: z.string().max(200), condition: z.string().max(100), location: z.string().max(200), category: z.array(z.string().max(120)).max(8), facts: z.record(z.string().max(100), z.string().max(500)), coverId: z.string().max(50) });
+const patchSchema = z.object({ accountId: z.string().min(1).max(50).optional(), revision: z.number().int(), title: z.string().max(120), description: z.string().max(6000), price: z.string().regex(/^(?:\d{0,8})(?:\.\d{0,2})?$/), currency: z.enum(['GEL', 'USD']), model: z.string().max(200), condition: z.string().max(100), location: z.string().max(200), category: z.array(z.string().max(120)).max(8), facts: z.record(z.string().max(100), z.string().max(500)), coverId: z.string().max(50) });
 export function createApp(store = new Store(), workflow = new Workflow(store), access = new AccessBoundary()) {
   const app = express(); app.disable('x-powered-by');
-  const manual = new ManualBrowser(workflow);
   const monitor = new ListingMonitor(workflow);
   app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'blob:', 'data:'], connectSrc: ["'self'", ...(!access.origin ? ['ws://127.0.0.1:*', 'ws://localhost:*'] : [])], objectSrc: ["'none'"], upgradeInsecureRequests: null } }, strictTransportSecurity: access.origin ? { maxAge: 15552000, includeSubDomains: false } : false }));
   app.use(access.middleware);
   app.use(express.json({ limit: '32kb' }));
   app.get('/api/auth/status', (req, res) => res.json(access.status(req)));
-  app.get('/api/health', (_req, res) => res.json({ application: 'linko-mymarketer', version: '0.2.0', releaseId: config.releaseId, automationBusy: workflow.busy, manualBrowserActive: workflow.manualActive, publishingEnabled: config.publish }));
+  app.get('/api/health', (_req, res) => res.json({ application: 'linko-mymarketer', version: '0.2.0', releaseId: config.releaseId, automationBusy: workflow.busy, publishingEnabled: config.publish }));
   app.post('/api/auth/login', (req, res) => access.login(req, res));
-  app.post('/api/auth/logout', async (req, res) => { if (manual.lease?.owner === access.session(req)) await manual.stop(access.session(req)); access.logout(req, res); });
+  app.post('/api/auth/logout', (req, res) => access.logout(req, res));
   app.get('/api/config', async (req, res) => {
     const choice = workflow.settings.load().ai.everyday, status = await providerStatus(choice.provider);
-    res.json({ everyday: status, codex: { available: choice.provider === 'codex' && status.installed, chatgptSignedIn: choice.provider === 'codex' && status.signedIn }, publishEnabled: config.publish, mode: access.origin ? 'tailnet' : 'local', publicOrigin: access.origin, browser: manual.status(access.session(req)) });
+    res.json({ everyday: status, codex: { available: choice.provider === 'codex' && status.installed, chatgptSignedIn: choice.provider === 'codex' && status.signedIn }, publishEnabled: config.publish, mode: access.origin ? 'tailnet' : 'local', publicOrigin: access.origin });
   });
   app.get('/api/settings', async (_req, res) => {
     const [codex, claude] = await Promise.all([providerStatus('codex'), providerStatus('claude')]);
-    res.json({ ...workflow.settings.view(), providers: { codex, claude } });
+    res.json({ ...workflow.settings.view(), accounts: workflow.accounts.view(), categoryTree: workflow.categories.status(), providers: { codex, claude } });
+  });
+  const idle = () => { if (workflow.busy || workflow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review first.'); };
+  app.get('/api/accounts', (_req, res) => res.json({ accounts: workflow.accounts.view(), lastUsed: workflow.accounts.defaultId }));
+  app.post('/api/settings/accounts', (req, res) => { idle(); workflow.accounts.add(addAccountSchema.parse(req.body)); res.json({ accounts: workflow.accounts.view() }); });
+  app.delete('/api/settings/accounts/:id', async (req, res) => {
+    idle(); const id = req.params.id;
+    workflow.busy = true;
+    try {
+      workflow.accounts.remove(id);
+      if (workflow.browser.accountId === id) {
+        await workflow.browser.useAccount(workflow.accounts.defaultId || randomUUID());
+        workflow.auth.vault = workflow.accounts.vault(workflow.accounts.defaultId || 'legacy');
+        workflow.auth.cancel(); workflow.auth.state = 'idle'; workflow.auth.messages = [];
+      }
+      res.json({ accounts: workflow.accounts.view() });
+    } finally { workflow.busy = false; }
+  });
+  app.post('/api/settings/categories/refresh', async (_req, res) => {
+    idle(); workflow.busy = true;
+    try { await workflow.categories.refresh(workflow.browser); res.json(workflow.categories.status()); }
+    finally { workflow.busy = false; }
   });
   app.put('/api/settings/ai', (req, res) => {
     if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the current job before changing AI settings.');
@@ -46,28 +67,23 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   });
   app.post('/api/settings/telegram/test', async (_req, res) => res.json({ sent: await workflow.telegram.send('Linko MyMarketer test message. Notifications are connected.') }));
   app.post('/api/settings/telegram/detect', async (_req, res) => res.json({ chatIds: await workflow.telegram.detect() }));
-  app.get('/api/browser/status', (req, res) => res.json(manual.status(access.session(req))));
   const credentialsSchema = z.object({ identifier: z.string().trim().min(3).max(120), password: z.string().min(1).max(256) }).strict();
   app.get('/api/agent', (_req, res) => res.json(workflow.auth.status()));
-  app.post('/api/agent/credentials', (req, res) => { workflow.auth.provideCredentials(credentialsSchema.parse(req.body)); res.json(workflow.auth.status()); });
+  app.post('/api/agent/credentials', (req, res) => { if (workflow.busy && workflow.auth.status().awaiting !== 'credentials') throw new WorkflowError('BUSY', 'Wait for the current task before changing credentials.'); workflow.auth.provideCredentials(credentialsSchema.parse(req.body)); res.json(workflow.auth.status()); });
   app.delete('/api/agent/credentials', (_req, res) => {
     if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the assistant to finish before removing your MyMarket details.');
     workflow.auth.vault.clear(); workflow.auth.say('Removed your MyMarket details from this server.'); res.json(workflow.auth.status());
   });
-  app.post('/api/agent/login', (_req, res) => { workflow.auth.login(); res.status(202).json(workflow.auth.status()); });
+  app.post('/api/agent/login', (_req, res) => { workflow.login(); res.status(202).json(workflow.auth.status()); });
   app.post('/api/agent/message', (req, res) => {
     const { text } = z.object({ text: z.string().trim().min(1).max(200) }).strict().parse(req.body);
-    if (workflow.auth.message(text) === 'login') workflow.auth.login();
+    if (workflow.auth.message(text) === 'login') workflow.login();
     res.json(workflow.auth.status());
   });
-  app.post('/api/browser/start', async (req, res) => res.json(await manual.start(access.session(req))));
-  app.get('/api/browser/frame', async (req, res) => { res.set('Cache-Control', 'no-store'); res.type('jpeg').send(await manual.frame(access.session(req))); });
-  app.post('/api/browser/control', async (req, res) => { await manual.control(access.session(req), req.body); res.json({ accepted: true }); });
-  app.post('/api/browser/finish', async (req, res) => { await manual.stop(access.session(req)); res.json({ active: false, loginVerified: false }); });
-  app.post('/api/drafts', (_req, res) => res.status(201).json(store.create()));
-  app.get('/api/listings', (_req, res) => res.json({ autoRelistEnabled: config.autoRelist && config.publish, records: workflow.archive.all().map(({ recipe, ...r }) => ({ ...r, title: recipe.title })) }));
+  app.post('/api/drafts', (_req, res) => res.status(201).json(store.create(workflow.accounts.defaultId || undefined)));
+  app.get('/api/listings', (_req, res) => res.json({ autoRelistEnabled: config.autoRelist && config.publish, records: workflow.archive.all().map(({ recipe, ...r }) => ({ ...r, accountId: recipe.accountId, title: recipe.title })) }));
   app.post('/api/listings/check', (_req, res) => {
-    if (workflow.busy || workflow.manualActive || workflow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review before checking listings.');
+    if (workflow.busy || workflow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review before checking listings.');
     void monitor.check().catch(() => {}); res.status(202).json({ accepted: true });
   });
   app.post('/api/listings/:id/delete', async (req, res) => {
@@ -94,6 +110,12 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     if (patch.revision !== d.revision) throw new WorkflowError('CONFLICT', 'This draft changed in another tab. Reload before editing it.');
     if (patch.coverId && !d.photos.some(p => p.id === patch.coverId)) throw new WorkflowError('PHOTO', 'Choose a cover from this draft.');
     if (Object.keys(patch.facts).length > 40) throw new WorkflowError('FACT', 'Keep item details to 40 fields or fewer.');
+    if (patch.accountId) { if (d.relistOf && patch.accountId !== d.accountId) throw new WorkflowError('ACCOUNT', 'A replacement must use the original listing account.'); workflow.accounts.require(patch.accountId); }
+    if (JSON.stringify(d.category) !== JSON.stringify(patch.category)) {
+      if (d.categoryCandidates?.length && !d.categoryCandidates.some(p => JSON.stringify(p) === JSON.stringify(patch.category))) throw new WorkflowError('CATEGORY', 'Choose one of the suggested existing category paths.');
+      d.categoryMethod = d.categoryCandidates?.length ? 'tree' : 'owner'; d.categoryCandidates = [];
+    }
+    if (patch.accountId) workflow.accounts.use(patch.accountId);
     Object.assign(d, patch); d.revision++; d.state = d.category.length ? 'review' : 'draft'; delete d.preparedRevision;
     workflow.prepared = undefined; store.save(d); res.json(d);
   });
@@ -127,7 +149,8 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     const operation = req.params.operation;
     if (!['analyze', 'prepare', 'publish'].includes(operation)) return res.status(404).json({ message: 'Unknown action.' });
     const d = store.get(req.params.id);
-    if (workflow.busy || workflow.manualActive) throw new WorkflowError('BUSY', 'Finish manual MyMarket login or wait for the current listing first.');
+    if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the current listing first.');
+    workflow.accounts.require(d.accountId || 'legacy');
     if (['published', 'unknown', 'publishing'].includes(d.state)) throw new WorkflowError('LOCKED', 'This item already has a publishing attempt. Check your MyMarket account.');
     if (!d.photos.length || !d.photos.some(p => p.id === d.coverId) || !d.description.trim() || !(Number(d.price) > 0)) throw new WorkflowError('INPUT', 'Add photos, choose a main photo, and provide a description and a price above zero.');
     if (req.body.revision !== d.revision) throw new WorkflowError('CONFLICT', 'Your draft changed. Save the latest details first.');
@@ -141,5 +164,5 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     // Never serialize provider, browser, request or database errors; they may contain secrets.
     res.status(status).json({ message: err instanceof WorkflowError ? err.message : status === 400 ? 'Check your input and photo size, then try again.' : 'The local server could not complete this action. Your saved draft is safe.' });
   });
-  return { app, store, workflow, access, manual, monitor };
+  return { app, store, workflow, access, monitor };
 }

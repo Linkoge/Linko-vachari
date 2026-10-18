@@ -6,9 +6,9 @@ import { CredentialVault, Credentials } from './credentials';
 import { registerSecret, redactSecrets, unregisterSecret } from './secrets';
 import { WorkflowError } from './types';
 
-export type AgentState = 'idle' | 'working' | 'awaiting_credentials' | 'awaiting_code' | 'signed_in' | 'failed' | 'manual';
+export type AgentState = 'idle' | 'working' | 'awaiting_credentials' | 'awaiting_code' | 'signed_in' | 'failed';
 export interface ChatMessage { id: number; role: 'agent' | 'owner'; text: string; at: string }
-export interface AgentHost { browser: MarketplaceBrowser; brain: typeof ask; busy: boolean; manualActive: boolean }
+export interface AgentHost { browser: MarketplaceBrowser; brain: typeof ask; busy: boolean; }
 type CodeOutcome = { kind: 'code'; fill: (code: string) => Promise<void>; submit?: Locator; wrong?: boolean };
 type Outcome = { kind: 'signed_in' } | { kind: 'rejected' } | { kind: 'captcha' } | { kind: 'unknown' } | CodeOutcome;
 
@@ -33,7 +33,7 @@ export class LoginAgent {
     if (this.messages.length > 80) this.messages.splice(0, this.messages.length - 80);
   }
   status() {
-    return { state: this.state, messages: this.messages, awaiting: this.pending?.kind || null, credentials: this.vault.status(), signedInAt: this.signedInAt || null, sessionReused: this.sessionReused, working: this.host.busy, fallbackAvailable: ['failed', 'manual', 'idle', 'signed_in'].includes(this.state) && !this.host.busy };
+    return { state: this.state, messages: this.messages, awaiting: this.pending?.kind || null, credentials: this.vault.status(), signedInAt: this.signedInAt || null, sessionReused: this.sessionReused, working: this.host.busy };
   }
   private ask(kind: 'credentials' | 'code') {
     this.cancelPending(new WorkflowError('LOGIN', 'The previous request was replaced.'));
@@ -52,7 +52,7 @@ export class LoginAgent {
     this.vault.save(input);
     this.say('Saved your MyMarket details privately on this server. They are never shown again or sent to the AI.');
     if (this.pending?.kind === 'credentials') { clearTimeout(this.pending.timer); const p = this.pending; this.pending = undefined; p.resolve(true); }
-    else if (['failed', 'idle', 'manual'].includes(this.state)) this.state = 'idle';
+    else if (['failed', 'idle'].includes(this.state)) this.state = 'idle';
   }
   /** The owner answered a pending question (a verification code) or sent a command. */
   message(text: string) {
@@ -70,14 +70,14 @@ export class LoginAgent {
   }
   /** Owner-triggered sign-in run, outside a listing run. */
   login() {
-    if (this.host.busy || this.host.manualActive) throw new WorkflowError('BUSY', 'The marketplace browser is in use. Wait for the current task or finish manual control first.');
+    if (this.host.busy) throw new WorkflowError('BUSY', 'The marketplace browser is in use. Wait for the current task.');
     this.host.busy = true; this.state = 'working';
     void this.ensureSignedIn().catch(() => {}).finally(() => { this.host.busy = false; });
   }
 
-  private settled() { return this.state === 'failed' || this.state === 'manual'; }
+  private settled() { return this.state === 'failed'; }
   private fail(message: string, state: AgentState = 'failed'): never {
-    this.state = state; this.say(message); throw new WorkflowError(state === 'manual' ? 'MANUAL_NEEDED' : 'LOGIN', message);
+    this.state = state; this.say(message); throw new WorkflowError('LOGIN', message);
   }
 
   /** Make sure the persistent browser holds a signed-in MyMarket session; reuse it when it already does. */
@@ -93,7 +93,7 @@ export class LoginAgent {
       return true;
     } catch (e) {
       if (e instanceof WorkflowError) { if (!this.settled()) { this.state = 'failed'; this.say(e.message); } throw e; }
-      this.state = 'failed'; this.say('The browser could not complete sign-in. You can open the private browser as a fallback.');
+      this.state = 'failed'; this.say('The browser could not complete sign-in. Please retry sign-in.');
       throw new WorkflowError('LOGIN', 'The browser could not complete sign-in.');
     }
   }
@@ -119,15 +119,15 @@ export class LoginAgent {
       if (!creds) this.fail('No MyMarket details were saved.');
       this.state = 'working';
     }
-    if (!await this.openLoginForm(page)) this.fail('I could not find the MyMarket sign-in form. You can open the private browser as a fallback.', 'manual');
+    if (!await this.openLoginForm(page)) this.fail('I could not find the MyMarket sign-in form. Please retry sign-in.');
     await this.type(page, creds!);
     let codes = 0;
     for (let round = 0; round < 6; round++) {
       const outcome = await this.outcome(page, codes > 0);
       if (outcome.kind === 'signed_in') return this.verify(say);
-      if (outcome.kind === 'captcha') this.fail('MyMarket is showing a puzzle I cannot solve on my own. Open the private browser, complete it, then ask me to sign in again.', 'manual');
+      if (outcome.kind === 'captcha') this.fail('MyMarket is showing a puzzle I cannot solve on my own. Sign-in stopped; retry when the challenge is resolved.');
       if (outcome.kind === 'rejected') this.fail(codes ? 'MyMarket ended the sign-in after the code. Ask me to sign in again for a fresh code.' : 'MyMarket did not accept that phone/email and password. Update your details below and I will try again.');
-      if (outcome.kind === 'unknown') this.fail('MyMarket showed a screen I do not recognise. You can open the private browser as a fallback.', 'manual');
+      if (outcome.kind === 'unknown') this.fail('MyMarket showed a screen I do not recognise. Please retry sign-in.');
       if (codes >= 3) this.fail('MyMarket did not accept the verification codes. Request a new code and ask me to sign in again.');
       if (outcome.kind !== 'code') this.fail('Unexpected sign-in state.');
       say(outcome.wrong ? 'MyMarket did not accept that code. Type the newest code here.' : 'MyMarket sent you a verification code by SMS or email. Type the code here and I will enter it.');
@@ -140,7 +140,7 @@ export class LoginAgent {
         await page.waitForTimeout(1500);
       } finally { unregisterSecret(code); }
     }
-    this.fail('Sign-in took too many steps. You can open the private browser as a fallback.', 'manual');
+    this.fail('Sign-in took too many steps. Please retry sign-in.');
   }
 
   private async openLoginForm(page: Page) {
@@ -220,7 +220,7 @@ export class LoginAgent {
 
   private async verify(say: (m: string) => void) {
     const page = await this.host.browser.home();
-    if (!await this.signedIn(page)) this.fail('MyMarket accepted the sign-in but I could not confirm the session. You can open the private browser as a fallback.', 'manual');
+    if (!await this.signedIn(page)) this.fail('MyMarket accepted the sign-in but I could not confirm the session. Please retry sign-in.');
     this.signedInAt = new Date().toISOString(); this.state = 'signed_in';
     say('Signed in. The session is saved in the private browser profile and will be reused.');
     return true;

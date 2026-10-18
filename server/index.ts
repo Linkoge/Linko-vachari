@@ -3,7 +3,7 @@ import express from 'express';
 import { resolve } from 'node:path';
 import { config } from './config';
 import { createApp } from './app';
-const { app, store, workflow, manual, monitor } = createApp(); store.recover(); workflow.archive.recover();
+const { app, store, workflow, monitor } = createApp(); store.recover(); workflow.archive.recover();
 for (const r of workflow.archive.all()) if (r.status === 'attention') workflow.telegram.notify(`Attention: ${r.recipe.title}. ${r.message}`);
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(resolve('dist'), { index: false }));
@@ -14,5 +14,5 @@ if (process.env.NODE_ENV === 'production') {
 }
 const server = app.listen(config.port, config.host, () => console.log(`Linko workspace: http://${config.host}:${config.port}`));
 monitor.start();
-async function stop() { monitor.stop(); workflow.auth.cancel(); if (manual.lease) await manual.stop(manual.lease.owner); await workflow.browser.close(); server.close(); store.db.close(); process.exit(0); }
+async function stop() { monitor.stop(); workflow.auth.cancel(); await workflow.browser.close(); server.close(); store.db.close(); process.exit(0); }
 process.on('SIGINT', stop); process.on('SIGTERM', stop);

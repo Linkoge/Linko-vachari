@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { allowedUrl, isListingUrl } from './browser';
+import { allowedUrl, isListingUrl, onAuthPage } from './browser';
 import { ListingMonitor } from './listings';
 import { ScriptChanged, signature, resolveStep, type SavedStep } from './replay';
 import { WorkflowError } from './types';
@@ -14,14 +14,16 @@ export class DeletionRunner {
   constructor(public flow: Workflow) {}
   async run(id: string) {
     const flow = this.flow, r = flow.archive.get(id);
-    if (flow.busy || flow.manualActive || flow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review before deleting.');
+    if (flow.busy || flow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review before deleting.');
     if (!r.receipt || r.deleteRequestedAt || ['replaced','relisting'].includes(r.status)) throw new WorkflowError('DELETE', 'This record cannot start another deletion attempt. Inspect MyMarket if attention is needed.');
+    flow.accounts.require(r.recipe.accountId || 'legacy');
     // Permanent tombstone comes BEFORE login, navigation, AI or the irreversible click.
     r.deleteRequestedAt = Date.now(); r.enabled = false; r.status = 'deleting'; r.message = 'Owner requested deletion. Automatic re-listing is permanently disabled.';
     flow.archive.write(r); flow.busy = true;
     const learned: SavedStep[] = [];
-    let deleted = false, confirmed = false, navigation = 0, dashboard = false;
+    let deleted = false, confirmed = false, navigation = 0, dashboard = false, signIns = 0;
     try {
+      await flow.useAccount(r.recipe);
       await flow.auth.ensureSignedIn(() => {});
       const page = flow.browser.page!;
       await flow.browser.go(r.receipt.url, page);
@@ -31,6 +33,10 @@ export class DeletionRunner {
       const execute = async (repair: boolean) => {
         for (let i = 0; i < 8; i++) {
           const s = await flow.browser.snapshot(page);
+          if (onAuthPage(s.url) || s.elements.some(e => e.type === 'password')) {
+            if (deleted || signIns++ >= 1) throw new WorkflowError('LOGIN', 'Deletion session expired; inspect the account before another action.');
+            await flow.auth.ensureSignedIn(); await flow.browser.go(r.receipt!.url, page); dashboard = false; continue;
+          }
           // On an account list, scope every destructive/edit target to the row that links to this exact public ad.
           const rowIds = dashboard && !deleted ? await page.evaluate(url => {
             const normalize = (u: string) => u.split('?')[0].replace(/\/$/,'');
