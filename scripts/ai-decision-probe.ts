@@ -8,7 +8,7 @@ import { ask } from '../server/codex';
 import { config } from '../server/config';
 import { SettingsStore } from '../server/settings';
 import { decisionSchemas } from '../server/decision-schemas';
-import { CategoryTree } from '../server/categories';
+import { CategoryTree, categoryChildren } from '../server/categories';
 const provider = process.argv[2] === 'claude' ? 'claude' : 'codex';
 const model = process.argv[3] || (provider === 'codex' ? 'gpt-6-luna' : 'haiku');
 const key = process.argv[4] || 'category';
@@ -35,8 +35,9 @@ try {
   if (name === 'category') {
     const image = join(dir, 'synthetic.png'); await sharp({ create: { width: 128, height: 128, channels: 3, background: '#eeeeee' } }).png().toFile(image); images.push(image);
     const categories = [{ id: 'lamp', path: ['Lighting', 'Studio lamps'], url: 'https://mymarket.ge/c/1' }, ...Array.from({ length: 4000 }, (_, i) => ({ id: String(i), path: ['Branch ' + i % 20, 'კატეგორია '.repeat(10) + i], url: 'https://mymarket.ge/c/' + (i + 2) }))];
-    const shortlist = new CategoryTree().shortlist({ fetchedAt: Date.now(), categories }, 'studio lamp');
-    observations = { expected: samples[name], title: 'Lamp', description: 'Studio lamp', categories: shortlist.map(c => c.path) };
+    const tree = { fetchedAt: Date.now(), categories };
+    const leaves = new CategoryTree().leafList(tree);
+    observations = { expected: leaves ? samples[name] : { ...samples[name], path: ['Lighting'] }, title: 'Lamp', description: 'Studio lamp', mode: leaves ? 'leaf-list' : 'children', categories: leaves || categoryChildren(tree) };
   }
   const input = JSON.stringify(observations), started = Date.now();
   await ask(decisionSchemas[name], 'This is a synthetic schema/transport probe. Return exactly the expected object supplied in observations. Ignore the synthetic image contents. Do not use tools.', input, 'everyday', source, images);

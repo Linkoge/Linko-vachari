@@ -144,12 +144,13 @@ readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.pa
   } finally { [config.codexBinary, config.claudeBinary] = previous; await rm(dir, { recursive: true, force: true }); }
 });
 
-test('category prompts stay bounded with multilingual/no-overlap trees and sample every root', () => {
+test('large multilingual trees require navigation; small trees retain every leaf regardless of text', () => {
   const categories = Array.from({ length: 4000 }, (_, i) => ({ id: String(i), path: ['Branch ' + i % 20, 'კატეგორია '.repeat(10) + i], url: 'https://mymarket.ge/c/' + i }));
   const tree = new CategoryTree();
-  for (const text of ['no overlap words', 'კატეგორია']) {
-    const result = tree.shortlist({ fetchedAt: Date.now(), categories }, text);
-    assert.ok(result.length <= 160); assert.ok(Buffer.byteLength(JSON.stringify(result.map(c => c.path))) <= 24_000);
-  }
-  assert.equal(new Set(tree.shortlist({ fetchedAt: Date.now(), categories }, 'no overlap words').map(c => c.path[0])).size, 20);
+  assert.equal(tree.leafList({ fetchedAt: Date.now(), categories }), undefined);
+  assert.equal(tree.leafList({ fetchedAt: Date.now(), categories: categories.slice(0, 120) }), undefined, 'byte-heavy trees must navigate even below the count limit');
+  const small = categories.slice(0, 120).map(c => ({ ...c, path: [c.path[0], 'კატეგორია ' + c.id] }));
+  const result = tree.leafList({ fetchedAt: Date.now(), categories: small })!;
+  assert.deepEqual(result, small.map(c => c.path));
+  assert.ok(Buffer.byteLength(JSON.stringify(result)) <= 24_000);
 });

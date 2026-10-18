@@ -1,4 +1,45 @@
 import { test, expect } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+
+test('disabled Publish explains the blocker inline and links to Settings', async ({ page, context }, info) => {
+  let enabled = false;
+  if (!(await (await page.request.get('/api/accounts')).json()).accounts.length) {
+    await page.request.post('/api/settings/accounts', { headers: { 'X-Linko-Request': '1' }, data: { label: 'UI test', identifier: 'owner@x.io', password: randomUUID() } });
+  }
+  await page.route('**/api/config', r => r.fulfill({ json: { publishEnabled: enabled, mode: 'local' } }));
+  await page.goto('/'); await expect(page.locator('input[type=file]')).toBeEnabled();
+  const publish = page.getByRole('button', { name: 'Publish', exact: true });
+  const reason = page.locator('#publish-reason');
+  await expect(publish).toBeDisabled(); await expect(reason).toHaveText('Publishing is off — turn it on in Settings');
+  await expect(publish).toHaveAccessibleDescription('Publishing is off — turn it on in Settings');
+  await page.screenshot({ path: info.outputPath('publish-overview.png'), fullPage: true });
+  await page.locator('.lean-publish').screenshot({ path: info.outputPath('publish-off.png') });
+  await reason.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  enabled = true;
+  await page.getByRole('button', { name: 'New listing', exact: true }).click();
+  await expect(reason).toHaveText('Add at least one photo');
+  await page.locator('input[type=file]').setInputFiles('public/icons/icon-192.png');
+  await expect(reason).toHaveText('Add a listing title'); await expect(publish).toBeDisabled();
+  await page.getByLabel('Listing title').fill('Canon EOS 600D');
+  await expect(reason).toHaveText('Add a description');
+  await page.getByLabel('Description', { exact: true }).fill('Original box included');
+  await expect(reason).toHaveText('Enter a price greater than zero');
+  await page.getByLabel('Asking price', { exact: true }).fill('350');
+  await expect(publish).toBeEnabled(); await expect(reason).toHaveCount(0);
+  await expect(page.locator('.lean-publish span')).toHaveText('Saved');
+  const id = await page.evaluate(() => sessionStorage.getItem('linko-draft'));
+  await page.route('**/api/drafts/' + id, async r => {
+    const response = await r.fetch(); const d = await response.json();
+    await r.fulfill({ response, json: { ...d, accountId: '' } });
+  });
+  await page.reload(); await expect(reason).toHaveText('Choose a listing account'); await expect(publish).toBeDisabled();
+  await context.setOffline(true); await expect(reason).toHaveText('Reconnect to publish'); await expect(publish).toBeDisabled();
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.locator('.lean-publish').screenshot({ path: info.outputPath('publish-mobile-offline.png') });
+  await context.setOffline(false);
+});
 
 test('one-page editor autosaves text, photos, cover and order; drafts resume and delete', async ({ page }, info) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));

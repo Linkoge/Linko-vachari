@@ -143,7 +143,7 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     if (Object.keys(patch.facts).length > 40) throw new WorkflowError('FACT', 'Keep item details to 40 fields or fewer.');
     if (patch.accountId) { if (d.relistOf && patch.accountId !== d.accountId) throw new WorkflowError('ACCOUNT', 'A replacement must use the original listing account.'); workflow.accounts.require(patch.accountId); }
     if (JSON.stringify(d.category) !== JSON.stringify(patch.category)) {
-      d.categoryMethod = d.categoryCandidates?.some(p => JSON.stringify(p) === JSON.stringify(patch.category)) ? 'tree' : 'owner'; d.categoryCandidates = [];
+      d.categoryMethod = d.categoryCandidates?.some(p => JSON.stringify(p) === JSON.stringify(patch.category)) ? d.categoryMethod === 'comparable-search' ? 'comparable-search' : 'tree' : 'owner'; d.categoryCandidates = [];
     }
     if (patch.accountId) workflow.accounts.use(patch.accountId);
     if (patch.photoOrder) {

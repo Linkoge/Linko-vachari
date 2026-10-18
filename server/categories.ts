@@ -9,6 +9,16 @@ const entry = z.object({ id: z.string().min(1), path: z.array(z.string().min(1))
 const treeSchema = z.object({ fetchedAt: z.number(), categories: z.array(entry).min(1) });
 export type Category = z.infer<typeof entry>;
 export type Tree = z.infer<typeof treeSchema>;
+export const samePath = (a: string[], b: string[]) => a.length === b.length && a.every((s, i) => s === b[i]);
+export const belowPath = (child: string[], parent: string[]) => child.length > parent.length && parent.every((s, i) => s === child[i]);
+export function categoryLeaves(tree: Tree) {
+  return tree.categories.filter(c => !tree.categories.some(other => belowPath(other.path, c.path)));
+}
+/** Includes implicit ancestors when a source supplies only complete leaf paths. */
+export function categoryChildren(tree: Tree, parent: string[] = []) {
+  const paths = tree.categories.filter(c => belowPath(c.path, parent)).map(c => c.path.slice(0, parent.length + 1));
+  return paths.filter((p, i) => paths.findIndex(other => samePath(p, other)) === i);
+}
 export function categoryId(href: string) {
   if (!allowedUrl(href) || !/^(www\.)?mymarket\.ge$/.test(new URL(href).hostname)) return '';
   const url = new URL(href);
@@ -114,35 +124,21 @@ export async function crawlCategories(browser: MarketplaceBrowser, maxPages = 50
 export class CategoryTree {
   constructor(public file = join(privateDir, 'category-tree.json'), public crawl = crawlCategories) {}
   read(): Tree | undefined { try { return treeSchema.parse(JSON.parse(readFileSync(this.file, 'utf8'))); } catch { return undefined; } }
-  status() { const t = this.read(); return { count: t?.categories.length || 0, fetchedAt: t?.fetchedAt || null, stale: !t || Date.now() - t.fetchedAt > TREE_MAX_AGE }; }
+  status() { const t = this.read(); return { count: t?.categories.length || 0, fetchedAt: t?.fetchedAt || null, stale: !t || !t.categories.some(c => c.path.length > 1) || Date.now() - t.fetchedAt > TREE_MAX_AGE }; }
   async refresh(browser: MarketplaceBrowser) {
     const categories = await this.crawl(browser);
     const tree = treeSchema.parse({ fetchedAt: Date.now(), categories });
+    if (!categories.some(c => c.path.length > 1)) throw new WorkflowError('CATEGORY_TREE', 'The category crawl returned only top levels; the previous saved tree was retained.');
     writeFileSync(this.file + '.tmp', JSON.stringify(tree), { mode: 0o600 }); renameSync(this.file + '.tmp', this.file); return tree;
   }
   async fresh(browser: MarketplaceBrowser) {
     if (!this.status().stale) return this.read();
     try { return await this.refresh(browser); } catch { return undefined; }
   }
-  shortlist(tree: Tree, text: string, limit = 160) {
-    const words = [...new Set(text.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [])];
-    const ranked = tree.categories.map((c, index) => ({ c, index, score: words.reduce((n, w) => n + (c.path.join(' ').toLocaleLowerCase().includes(w) ? w.length : 0), 0) }));
-    let candidates = ranked.sort((a, b) => b.score - a.score || a.index - b.index).map(r => r.c);
-    // With no shared language, sample across all roots instead of sending the
-    // entire tree or filling the budget with the first branch only.
-    if (!ranked.some(r => r.score > 0)) {
-      const branches = new Map<string, typeof candidates>();
-      for (const c of candidates) { const key = c.path[0]; const branch = branches.get(key) || []; branch.push(c); branches.set(key, branch); }
-      candidates = []; const groups = [...branches.values()];
-      for (let i = 0; candidates.length < tree.categories.length; i++) for (const group of groups) if (group[i]) candidates.push(group[i]);
-    }
-    let bytes = 2;
-    const result: typeof candidates = [];
-    for (const c of candidates) {
-      const size = Buffer.byteLength(JSON.stringify(c.path)) + 1;
-      if (bytes + size > 24_000) continue;
-      result.push(c); bytes += size; if (result.length >= limit) break;
-    }
-    return result;
+  leafList(tree: Tree) {
+    const leaves = categoryLeaves(tree).map(c => c.path);
+    // Never truncate a taxonomy by literal word overlap or sampling. Larger
+    // trees are navigated by their direct children in Workflow instead.
+    return leaves.length <= 160 && Buffer.byteLength(JSON.stringify(leaves)) <= 24_000 ? leaves : undefined;
   }
 }

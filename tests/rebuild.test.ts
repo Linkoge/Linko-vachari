@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 import { Store } from '../server/store';
 import { Workflow } from '../server/workflow';
 import { CredentialVault } from '../server/credentials';
-import { CategoryTree, TREE_MAX_AGE, crawlCategories, categoryId, categoriesFromResponse } from '../server/categories';
+import { CategoryTree, TREE_MAX_AGE, crawlCategories, categoryId, categoriesFromResponse, categoryLeaves } from '../server/categories';
 import { MarketplaceBrowser } from '../server/browser';
 import { config, privateDir } from '../server/config';
 import { createApp } from '../server/app';
@@ -102,6 +102,9 @@ test('account API chooses last-used by default, keeps credentials write-only and
     assert.equal((await call('/drafts/' + candidateDraft.id, 'PATCH', { ...candidateDraft, accountId: '' })).status, 400);
     const picked = await call('/drafts/' + candidateDraft.id, 'PATCH', { ...candidateDraft, category: categories[0].path });
     assert.equal(picked.status, 200); assert.equal((await picked.json()).categoryMethod, 'tree');
+    candidateDraft = f.store.get(candidateDraft.id); candidateDraft.categoryCandidates = [categories[1].path]; candidateDraft.categoryMethod = 'comparable-search'; f.store.save(candidateDraft);
+    const comparablePick = await call('/drafts/' + candidateDraft.id, 'PATCH', { ...candidateDraft, category: categories[1].path });
+    assert.equal(comparablePick.status, 200); assert.equal((await comparablePick.json()).categoryMethod, 'comparable-search');
     flow.busy = true;
     assert.equal((await call('/settings/accounts/' + id, 'DELETE')).status, 409);
     assert.equal((await call('/settings/accounts', 'POST', { ...creds(), label: 'Blocked' })).status, 409);
@@ -136,7 +139,7 @@ test('semantic category crawler collects complete nested paths/IDs and atomicall
   } finally { await real.close(); f.close(); }
 });
 
-test('tree selection sends item, price, cover and filtered categories to Everyday; validates exact paths and offers candidates', async () => {
+test('tree selection sends item, price, cover and all leaves to Everyday; validates exact paths and offers candidates', async () => {
   let answer = { confident: true, path: categories[0].path, candidates: [] as string[][] }, calls = 0;
   const f = fixture((async (_schema, _instructions, input, slot, _settings, images) => {
     calls++; const data = JSON.parse(input); assert.equal(slot, 'everyday'); assert.equal(data.price, '25'); assert.equal(data.title, 'Studio lamp');
@@ -152,9 +155,88 @@ test('tree selection sends item, price, cover and filtered categories to Everyda
     let fallback = 0; flow.comparableCategory = async () => { fallback++; };
     answer = { confident: true, path: ['Invented'], candidates: [] }; await flow.analyze(d); assert.equal(fallback, 1);
     answer = { confident: false, path: [], candidates: [] }; await flow.analyze(d); assert.equal(fallback, 2);
-    const large = { fetchedAt: Date.now(), categories: Array.from({ length: 400 }, (_, i) => ({ id: '' + i, path: [i === 390 ? 'Studio lamps' : `Other ${i}`], url: `https://mymarket.ge/c/${i}/` })) };
-    const list = flow.categories.shortlist(large, d.title); assert.equal(list.length, 160); assert.equal(list[0].id, '390');
-    assert.equal(flow.categories.shortlist(large, 'ქართული აღწერა').length, 160, 'no-overlap prompts must stay bounded');
+    const large = { fetchedAt: Date.now(), categories: Array.from({ length: 400 }, (_, i) => ({ id: '' + i, path: ['Devices', `Other ${i}`], url: `https://mymarket.ge/c/${i}/` })) };
+    assert.equal(flow.categories.leafList(large), undefined, 'large trees must navigate instead of discarding unmatched leaves');
+  } finally { f.close(); }
+});
+
+for (const large of [false, true]) test(`Canon EOS 600D with no camera word resolves to a leaf using ${large ? 'direct-child navigation' : 'all leaves'}`, async () => {
+  const camera = ['ტექნიკა', 'ფოტო', 'ფოტოკამერა'];
+  const nodes = [
+    { id: 'd', path: camera.slice(0, 1), url: 'https://mymarket.ge/c/1/' },
+    { id: 'p', path: camera.slice(0, 2), url: 'https://mymarket.ge/c/2/' },
+    { id: 'c', path: camera, url: 'https://mymarket.ge/c/3/' },
+    ...Array.from({ length: large ? 400 : 2 }, (_, i) => ({ id: `other${i}`, path: ['Other', `Original box ${i}`], url: `https://mymarket.ge/c/${i + 10}/` })),
+  ];
+  let calls = 0;
+  const f = fixture((async (_schema, instructions, input, slot, _settings, images) => {
+    const data = JSON.parse(input); calls++;
+    assert.match(instructions, /infer the item object class/); assert.match(instructions, /not literal word overlap/);
+    assert.equal(data.title, 'Canon EOS 600D'); assert.equal(data.description, 'Original box included'); assert.equal(data.model, 'EOS 600D'); assert.equal(slot, 'everyday');
+    assert.deepEqual(images, [join(privateDir, 'photos', 'cover.jpg')]);
+    const path = large ? camera.slice(0, calls) : camera;
+    assert.ok(data.categories.some((p: string[]) => JSON.stringify(p) === JSON.stringify(path)), 'the semantic camera branch cannot be filtered out');
+    assert.equal(data.mode, large ? 'children' : 'leaf-list');
+    return { title: data.title, confident: true, path, candidates: [] };
+  }) as typeof ask);
+  const flow = f.flow(); flow.categories = new CategoryTree(join(f.dir, 'tree.json'));
+  writeFileSync(flow.categories.file, JSON.stringify({ fetchedAt: Date.now(), categories: nodes }));
+  const d = f.store.create(); Object.assign(d, { title: 'Canon EOS 600D', model: 'EOS 600D', description: 'Original box included', coverId: 'cover' });
+  try {
+    flow.comparableCategory = async () => { assert.fail('tree should resolve the camera'); };
+    await flow.analyze(d); assert.deepEqual(d.category, camera); assert.equal(d.categoryMethod, 'tree'); assert.equal(calls, large ? 3 : 1);
+  } finally { f.close(); }
+});
+
+test('parent-only answers and candidates are rejected, and known parents cannot reach preparation or publication', async () => {
+  const parent = { id: 'p', path: ['Devices'], url: 'https://mymarket.ge/c/10/' };
+  const leaves = ['Photo cameras', 'Video cameras', 'Lenses'].map((label, i) => ({ id: String(i), path: ['Devices', 'Photo', label], url: `https://mymarket.ge/c/${i + 20}/` }));
+  let answer = { confident: true, path: parent.path, candidates: [] as string[][] };
+  const f = fixture((async () => answer) as typeof ask), flow = f.flow();
+  flow.categories = new CategoryTree(join(f.dir, 'tree.json'));
+  writeFileSync(flow.categories.file, JSON.stringify({ fetchedAt: Date.now(), categories: [parent, ...leaves] }));
+  const d = f.store.create(); d.title = 'Canon EOS 600D'; let fallbacks = 0;
+  flow.comparableCategory = async () => { fallbacks++; };
+  try {
+    await flow.analyze(d); assert.equal(fallbacks, 1); assert.deepEqual(d.category, []);
+    answer = { confident: false, path: [], candidates: [parent.path] };
+    await flow.analyze(d); assert.equal(fallbacks, 2); assert.deepEqual(d.categoryCandidates, []);
+    answer = { confident: false, path: [], candidates: leaves.map(c => c.path) };
+    await flow.analyze(d); assert.equal(d.state, 'needs_input'); assert.deepEqual(d.categoryCandidates, leaves.map(c => c.path));
+    d.category = ['Devices', 'Photo'];
+    await assert.rejects(flow.prepareWithCategory(d), /has children/);
+    await assert.rejects(flow.replayPrepare(d), /has children/);
+    await assert.rejects(flow.publish(d), /has children/);
+  } finally { f.close(); }
+});
+
+test('uncertain branches are descended to top-three leaves, never offered as parents', async () => {
+  const nodes = Array.from({ length: 180 }, (_, i) => ({ id: String(i), path: ['Devices', `Class ${i}`, `Leaf ${i}`], url: `https://mymarket.ge/c/${i + 1}/` }));
+  let calls = 0;
+  const f = fixture((async (_schema, _instructions, input) => {
+    const data = JSON.parse(input); calls++;
+    return { title: '', confident: calls === 1, path: ['Devices'], candidates: data.categories.slice(0, 3) };
+  }) as typeof ask), flow = f.flow(); flow.categories = new CategoryTree(join(f.dir, 'tree.json'));
+  writeFileSync(flow.categories.file, JSON.stringify({ fetchedAt: Date.now(), categories: nodes }));
+  try {
+    const d = f.store.create(); await flow.analyze(d);
+    assert.equal(calls, 3); assert.equal(d.state, 'needs_input'); assert.deepEqual(d.categoryCandidates, nodes.slice(0, 3).map(c => c.path)); assert.deepEqual(d.category, []);
+  } finally { f.close(); }
+});
+
+test('root-only snapshots refresh and root-only crawls cannot overwrite a deep saved tree', async () => {
+  const f = fixture(), tree = new CategoryTree(join(f.dir, 'tree.json'));
+  const rootOnly = [{ id: '1', path: ['Devices'], url: 'https://mymarket.ge/c/1/' }];
+  writeFileSync(tree.file, JSON.stringify({ fetchedAt: Date.now(), categories: rootOnly }));
+  tree.crawl = async () => categories;
+  try {
+    assert.equal(tree.status().stale, true);
+    const refreshed = await tree.fresh(new MarketplaceBrowser()); assert.deepEqual(refreshed?.categories, categories);
+    const saved = readFileSync(tree.file, 'utf8'); tree.crawl = async () => rootOnly;
+    await assert.rejects(tree.refresh(new MarketplaceBrowser()), /only top levels/); assert.equal(readFileSync(tree.file, 'utf8'), saved);
+    assert.deepEqual(categoryLeaves({ fetchedAt: 0, categories: categoriesFromResponse({ statusCode: 200, data: [
+      { id: 1, parent_id: 0, title: 'Devices' }, { id: 2, parent_id: 1, title: 'Photo' }, { id: 3, parent_id: 2, title: 'Photo cameras' },
+    ] }) }).map(c => c.path), [['Devices', 'Photo', 'Photo cameras']]);
   } finally { f.close(); }
 });
 
@@ -170,6 +252,26 @@ test('missing/stale trees and withdrawn live categories trigger fallback; compar
     d.categoryMethod = 'tree'; let prepares = 0;
     flow.prepareWithCategory = async () => { if (++prepares === 1) throw new WorkflowError('CATEGORY_UNAVAILABLE', 'withdrawn'); d.state = 'ready'; };
     queries.length = 0; await flow.prepareAI(d); assert.equal(prepares, 2); assert.equal(queries.length, 4); assert.equal(d.categoryMethod, 'comparable-search');
+  } finally { f.close(); }
+});
+
+test('comparable fallback excludes known parents and offers uncertain witnessed leaves without preparing a parent', async () => {
+  let confident = true;
+  const f = fixture((async (_s, instructions) => instructions.startsWith('Suggest') ? { title: 'Canon EOS 600D', query: 'photo camera', queries: ['Canon EOS 600D', 'photo camera', 'digital photography'] } : { confident, index: 0 }) as typeof ask);
+  const flow = f.flow(); flow.categories = new CategoryTree(join(f.dir, 'tree.json'));
+  const cameraPaths = ['Photo cameras', 'Video cameras', 'Lenses'].map(s => ['Devices', 'Photo', s]);
+  writeFileSync(flow.categories.file, JSON.stringify({ fetchedAt: Date.now(), categories: cameraPaths.map((path, i) => ({ id: String(i), path, url: `https://mymarket.ge/c/${i + 1}/` })) }));
+  let paths = [['Devices'], ...cameraPaths];
+  flow.searchComparables = async d => { d.comparables = paths.map((breadcrumbs, i) => ({ title: 'Canon', url: `https://mymarket.ge/pr/${i + 1}/canon`, breadcrumbs })); };
+  const d = f.store.create();
+  try {
+    await flow.comparableCategory(d); assert.deepEqual(d.category, cameraPaths[0]);
+    confident = false;
+    await flow.comparableCategory(d); assert.deepEqual(d.categoryCandidates, cameraPaths); assert.deepEqual(d.category, []); assert.equal(d.state, 'needs_input');
+    let attempts = 0; d.category = ['Devices']; d.categoryMethod = 'tree';
+    flow.prepareWithCategory = async () => { attempts++; throw new WorkflowError('CATEGORY_UNAVAILABLE', 'withdrawn'); };
+    await flow.prepareAI(d); assert.equal(attempts, 1); assert.equal(d.state, 'needs_input'); assert.deepEqual(d.category, []);
+    paths = [['Devices']]; await assert.rejects(flow.comparableCategory(d), /only parent categories/); assert.deepEqual(d.category, []);
   } finally { f.close(); }
 });
 
