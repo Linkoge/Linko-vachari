@@ -12,6 +12,7 @@ import { savePhoto } from './photos';
 import { WorkflowError } from './types';
 import { AccessBoundary } from './access';
 import { providerStatus } from './codex';
+import { providerModels, validateModelChanges } from './ai-models';
 import { addAccountSchema } from './accounts';
 import { aiSchema, automationSchema } from './settings';
 import { myListings } from './listing-summary';
@@ -34,8 +35,8 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     res.json({ everyday: status, codex: { available: choice.provider === 'codex' && status.installed, chatgptSignedIn: choice.provider === 'codex' && status.signedIn }, publishEnabled: workflow.settings.load().automation.publish, mode: access.origin ? 'tailnet' : 'local', publicOrigin: access.origin });
   });
   app.get('/api/settings', async (_req, res) => {
-    const [codex, claude] = await Promise.all([providerStatus('codex'), providerStatus('claude')]);
-    res.json({ ...workflow.settings.view(), accounts: workflow.accounts.view(), categoryTree: workflow.categories.status(), providers: { codex, claude } });
+    const [codex, claude, models] = await Promise.all([providerStatus('codex'), providerStatus('claude'), providerModels()]);
+    res.json({ ...workflow.settings.view(), accounts: workflow.accounts.view(), categoryTree: workflow.categories.status(), providers: { codex, claude }, models });
   });
   const idle = () => { if (workflow.busy || workflow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review first.'); };
   app.get('/api/accounts', (_req, res) => res.json({ accounts: workflow.accounts.view(), lastUsed: workflow.accounts.defaultId }));
@@ -58,9 +59,11 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     try { await workflow.categories.refresh(workflow.browser); res.json(workflow.categories.status()); }
     finally { workflow.busy = false; }
   });
-  app.put('/api/settings/ai', (req, res) => {
+  app.put('/api/settings/ai', async (req, res) => {
     if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the current job before changing AI settings.');
-    const data = workflow.settings.load(); data.ai = aiSchema.parse(req.body); res.json(workflow.settings.save(data));
+    const data = workflow.settings.load(); const ai = aiSchema.parse(req.body); await validateModelChanges(data.ai, ai);
+    if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the current job before changing AI settings.');
+    const current = workflow.settings.load(); current.ai = ai; res.json(workflow.settings.save(current));
   });
   app.put('/api/settings/automation', (req, res) => {
     const data = workflow.settings.load(); data.automation = automationSchema.parse(req.body);

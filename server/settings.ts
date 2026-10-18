@@ -16,8 +16,14 @@ export type SettingsData = z.infer<typeof settingsSchema>;
 export class SettingsStore {
   constructor(public file = join(privateDir, 'settings.json')) {}
   load(): SettingsData {
-    if (!existsSync(this.file)) return { ai: { everyday: { provider: 'codex', model: 'gpt-5.4-mini', effort: 'low' }, fixit: { provider: 'codex', model: 'gpt-5.4', effort: 'high' } }, telegram: { token: '', chatId: '' }, automation: initialAutomation() };
-    try { const data = settingsSchema.parse(JSON.parse(readFileSync(this.file, 'utf8'))); registerSecret(data.telegram.token); return data; }
+    if (!existsSync(this.file)) return { ai: { everyday: { provider: 'codex', model: 'gpt-6-luna', effort: 'low' }, fixit: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'high' } }, telegram: { token: '', chatId: '' }, automation: initialAutomation() };
+    try { const data = settingsSchema.parse(JSON.parse(readFileSync(this.file, 'utf8'))); registerSecret(data.telegram.token);
+      // Migrate only the two obsolete bundled Codex IDs; preserve all owner choices.
+      for (const slot of ['everyday', 'fixit'] as const) {
+        const choice = data.ai[slot];
+        if (choice.provider === 'codex') choice.model = ({ 'gpt-5.4-mini': 'gpt-6-luna', 'gpt-5.4': 'gpt-6.1-sol' } as Record<string, string>)[choice.model] || choice.model;
+      }
+      return data; }
     catch { throw new WorkflowError('SETTINGS', 'Saved settings could not be read. Repair the private settings file before running jobs.'); }
   }
   save(data: SettingsData) {

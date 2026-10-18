@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { decisionSchemas } from './decision-schemas';
 import { allowedUrl, isListingUrl, onAuthPage } from './browser';
 import { ListingMonitor } from './listings';
 import { ScriptChanged, signature, resolveStep, type SavedStep } from './replay';
@@ -8,7 +8,7 @@ const remove = /^(delete(?: listing| ad| item)?|remove (?:listing|ad|item)|წ�
 const confirm = /^(confirm(?: deletion| delete)?|yes,? delete|დიახ|დაადასტურე|დადასტურება)$/i;
 const manage = /^(edit(?: listing| ad| item)?|manage(?: listing| ad| item)?|რედაქტირება|განცხადების რედაქტირება)$/i;
 const accountListings = /^(my (?:ads|listings|items)|ჩემი განცხადებები)$/i;
-const schema = z.object({ confident: z.boolean(), target: z.string(), action: z.enum(['navigate', 'delete', 'confirm', 'uncertain']) });
+const schema = decisionSchemas.deletion;
 
 export class DeletionRunner {
   constructor(public flow: Workflow) {}

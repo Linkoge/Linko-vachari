@@ -61,6 +61,7 @@ if(args.includes('--output-last-message'))writeFileSync(args[args.indexOf('--out
 });
 
 test('settings API saves only two slots and keeps Telegram token write-only behind CSRF', { timeout: 30_000 }, async () => {
+  const previousClaude = config.claudeBinary; config.claudeBinary = new URL('./fixtures/codex-fixture.mjs', import.meta.url).pathname;
   const root = mkdtempSync(join(tmpdir(), 'linko-settings-')), source = new SettingsStore(join(root, 'settings.json'));
   const store = new Store(':memory:', join(root,'listings')), flow = new Workflow(store, ask, undefined, source);
   const { app } = createApp(store, flow), server = app.listen(0,'127.0.0.1'); await new Promise<void>(r=>server.on('listening',r));
@@ -76,5 +77,5 @@ test('settings API saves only two slots and keeps Telegram token write-only behi
     const text = await response.text(); assert.equal(text.includes(marker),false); assert.equal(response.headers.get('cache-control'),'no-store'); assert.equal(source.load().telegram.token,marker);
     await fetch(base+'/telegram',{method:'PUT',headers,body:JSON.stringify({chatId:'456'})}); assert.equal(source.load().telegram.token,marker);
     flow.busy = true; assert.equal((await fetch(base+'/ai',{method:'PUT',headers,body:JSON.stringify(data.ai)})).status,409);
-  } finally { await new Promise<void>(r=>server.close(()=>r())); store.db.close(); rmSync(root,{recursive:true,force:true}); }
+  } finally { config.claudeBinary = previousClaude; await new Promise<void>(r=>server.close(()=>r())); store.db.close(); rmSync(root,{recursive:true,force:true}); }
 });

@@ -5,14 +5,18 @@ const providers = {
   codex: { installed: true, signedIn: true, message: 'Signed in with local subscription' },
   claude: { installed: false, signedIn: false, message: 'CLI not installed, unsupported, or status check timed out' },
 };
-const initialAI = () => ({ everyday: { provider: 'codex', model: 'small-choice', effort: 'low' }, fixit: { provider: 'claude', model: 'opus', effort: 'high' } });
+const models = {
+  codex: [{ name: 'Luna', model: 'gpt-6-luna' }, { name: 'Sol', model: 'gpt-6.1-sol' }, { name: 'Astra', model: 'gpt-6-astra' }].map(m => ({ ...m, efforts: ['low', 'medium', 'high'] })),
+  claude: ['haiku', 'sonnet', 'opus'].map(model => ({ name: model[0].toUpperCase() + model.slice(1), model, efforts: ['low', 'medium', 'high'] })),
+};
+const initialAI = () => ({ everyday: { provider: 'codex', model: 'gpt-6-luna', effort: 'low' }, fixit: { provider: 'claude', model: 'opus', effort: 'high' } });
 
 for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }, { width: 320, height: 740 }]) {
   test(`AI picker and Telegram persist at ${size.width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize(size);
     let saved = { ai: initialAI(), telegram: { configured: false, chatId: '' }, automation: { publish: false, autoRelist: false } }; let sent = 0, detected = 0;
     const writes: unknown[] = [], marker = randomUUID();
-    await page.route('**/api/settings', r => r.fulfill({ json: { ...saved, providers } }));
+    await page.route('**/api/settings', r => r.fulfill({ json: { ...saved, providers, models } }));
     await page.route('**/api/settings/ai', r => { writes.push(r.request().postDataJSON()); saved = { ...saved, ai: r.request().postDataJSON() }; return r.fulfill({ json: saved }); });
     await page.route('**/api/settings/telegram', r => {
       const data = r.request().postDataJSON(); if (data.token) expect(data.token).toBe(marker);
@@ -32,7 +36,7 @@ for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }, 
     await expect(dialog.getByRole('checkbox')).toHaveCount(2);
     await expect(picker.locator('fieldset')).toHaveCount(2);
     await expect(picker.locator('.model-choice-row[role=group]')).toHaveCount(8);
-    await expect(picker.getByRole('button', { name: 'Everyday Codex small-choice', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(picker.getByRole('button', { name: 'Everyday Codex Luna', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(picker.getByRole('button', { name: 'Fix-it Claude Opus', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(picker.getByRole('button', { name: 'Everyday Claude Low', exact: true })).toBeDisabled();
     await expect(picker.getByRole('button', { name: 'Fix-it Codex High', exact: true })).toBeDisabled();
@@ -83,7 +87,7 @@ for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }, 
 
 test('pending, rejected and lost saves never show an unconfirmed selection or switch provider', async ({ page, context }) => {
   let ai = initialAI(), available = true;
-  await page.route('**/api/settings', r => available ? r.fulfill({ json: { ai, telegram: { configured: false, chatId: '' }, automation: { publish: false, autoRelist: false }, providers } }) : r.abort());
+  await page.route('**/api/settings', r => available ? r.fulfill({ json: { ai, telegram: { configured: false, chatId: '' }, automation: { publish: false, autoRelist: false }, providers, models } }) : r.abort());
   let finish: () => void = () => {};
   await page.route('**/api/settings/ai', async r => {
     await new Promise<void>(resolve => { finish = resolve; });
@@ -98,7 +102,7 @@ test('pending, rejected and lost saves never show an unconfirmed selection or sw
   finish();
   await expect(page.getByRole('alert')).toContainText('Wait for the current job');
   await expect(sol).toHaveAttribute('aria-pressed', 'false');
-  await expect(picker.getByRole('button', { name: 'Everyday Codex small-choice', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(picker.getByRole('button', { name: 'Everyday Codex Luna', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(sol).toBeFocused();
   // The write commits but its response is lost: GET is authoritative.
   await page.route('**/api/settings/ai', r => { ai = r.request().postDataJSON(); return r.abort(); });
@@ -118,33 +122,30 @@ test('pending, rejected and lost saves never show an unconfirmed selection or sw
   await expect(page.getByText('Offline · saved choices cannot be changed', { exact: true })).toBeVisible();
 });
 
-test('custom models preserve the exact ID, effort and independent slot through real API persistence', async ({ page, request }) => {
-  // The production server uses a disposable data directory. Only provider readiness
-  // is mocked; the UI saves/reloads through the real private settings API.
-  await page.route('**/api/settings', async r => {
-    const response = await r.fetch(); await r.fulfill({ json: { ...await response.json(), providers } });
-  });
+test('only installed catalog models are offered and unavailable API choices cannot replace saved slots', async ({ page, request }) => {
   const initial = await (await request.get('/api/settings')).json();
   await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const slot = page.locator('.ai-slot').filter({ has: page.locator('legend', { hasText: 'Fix-it' }) });
-  await slot.getByText('Use another model', { exact: true }).click();
-  await slot.getByLabel('Fix-it custom provider').selectOption('claude');
-  const model = slot.getByLabel('Fix-it custom model');
-  await model.fill('bad model');
-  expect(await model.evaluate(el => (el as HTMLInputElement).validity.patternMismatch)).toBe(true);
-  await model.fill('account/model.v2');
-  expect(await model.evaluate(el => (el as HTMLInputElement).checkValidity())).toBe(true);
-  await slot.getByLabel('Fix-it custom model').fill('my-exact-model');
-  await expect(slot.locator('.model-family[aria-pressed=true]')).toHaveText(initial.ai.fixit.model);
-  await slot.getByRole('button', { name: 'Save model', exact: true }).click();
-  await expect(slot.getByRole('button', { name: 'Fix-it Claude my-exact-model', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(slot.getByText('Use another model', { exact: true })).toHaveCount(0);
+  await slot.getByRole('button', { name: 'Fix-it Claude Sonnet', exact: true }).click();
   await slot.getByRole('button', { name: 'Fix-it Claude Medium', exact: true }).click();
-  await expect(slot.getByRole('button', { name: 'Fix-it Claude Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
   const saved = await (await request.get('/api/settings')).json();
-  expect(saved.ai).toEqual({ everyday: initial.ai.everyday, fixit: { provider: 'claude', model: 'my-exact-model', effort: 'medium' } });
+  expect(saved.ai).toEqual({ everyday: initial.ai.everyday, fixit: { provider: 'claude', model: 'sonnet', effort: 'medium' } });
+  const rejected = await request.put('/api/settings/ai', { headers: { 'X-Linko-Request': '1' }, data: { ...saved.ai, everyday: { provider: 'codex', model: 'unknown-model', effort: 'low' } } });
+  expect(rejected.status()).toBe(409); expect((await rejected.json()).message).toContain('unavailable');
+  expect((await (await request.get('/api/settings')).json()).ai).toEqual(saved.ai);
   await page.reload(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(slot.getByRole('button', { name: 'Fix-it Claude my-exact-model', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(slot.getByRole('button', { name: 'Fix-it Claude Sonnet', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(slot.getByRole('button', { name: 'Fix-it Claude Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('a saved unavailable model is explained without offering it as a selectable button', async ({ page }) => {
+  const ai = initialAI(); ai.everyday.model = 'obsolete-model';
+  await page.route('**/api/settings', r => r.fulfill({ json: { ai, models, telegram: { configured: false, chatId: '' }, automation: { publish: false, autoRelist: false } } }));
+  await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByText('obsolete-model · unavailable in the installed CLI catalog. Choose a listed model.')).toBeVisible();
+  await expect(page.getByRole('button', { name: /obsolete-model/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Everyday Codex Low', exact: true })).toBeDisabled();
 });
 
 test('publish and auto-relist toggles save through the real API and survive navigation and reload', async ({ page, request }) => {
@@ -174,7 +175,7 @@ test('publish and auto-relist toggles save through the real API and survive navi
 
 test('a rejected automation save restores server state and offline toggles stay disabled', async ({ page, context }) => {
   const automation = { publish: false, autoRelist: true };
-  await page.route('**/api/settings', r => r.fulfill({ json: { ai: initialAI(), telegram: { configured: false, chatId: '' }, automation } }));
+  await page.route('**/api/settings', r => r.fulfill({ json: { ai: initialAI(), telegram: { configured: false, chatId: '' }, automation, models } }));
   await page.route('**/api/settings/automation', r => r.fulfill({ status: 500, json: { message: 'Settings could not be saved.' } }));
   await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
   const publish = page.getByRole('checkbox', { name: 'Publish', exact: true });

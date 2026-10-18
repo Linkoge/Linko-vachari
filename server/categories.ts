@@ -125,11 +125,24 @@ export class CategoryTree {
     try { return await this.refresh(browser); } catch { return undefined; }
   }
   shortlist(tree: Tree, text: string, limit = 160) {
-    if (tree.categories.length <= limit) return tree.categories;
     const words = [...new Set(text.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [])];
     const ranked = tree.categories.map((c, index) => ({ c, index, score: words.reduce((n, w) => n + (c.path.join(' ').toLocaleLowerCase().includes(w) ? w.length : 0), 0) }));
-    // English item text may have no overlap with Georgian labels. Never discard the whole matching branch by taking an arbitrary prefix.
-    if (!ranked.some(r => r.score > 0)) return tree.categories;
-    return ranked.sort((a, b) => b.score - a.score || a.index - b.index).slice(0, limit).map(r => r.c);
+    let candidates = ranked.sort((a, b) => b.score - a.score || a.index - b.index).map(r => r.c);
+    // With no shared language, sample across all roots instead of sending the
+    // entire tree or filling the budget with the first branch only.
+    if (!ranked.some(r => r.score > 0)) {
+      const branches = new Map<string, typeof candidates>();
+      for (const c of candidates) { const key = c.path[0]; const branch = branches.get(key) || []; branch.push(c); branches.set(key, branch); }
+      candidates = []; const groups = [...branches.values()];
+      for (let i = 0; candidates.length < tree.categories.length; i++) for (const group of groups) if (group[i]) candidates.push(group[i]);
+    }
+    let bytes = 2;
+    const result: typeof candidates = [];
+    for (const c of candidates) {
+      const size = Buffer.byteLength(JSON.stringify(c.path)) + 1;
+      if (bytes + size > 24_000) continue;
+      result.push(c); bytes += size; if (result.length >= limit) break;
+    }
+    return result;
   }
 }

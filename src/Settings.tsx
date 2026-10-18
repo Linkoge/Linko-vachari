@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { SettingsData, AIChoice, AISlot } from '../server/settings';
 import { AccountsSettings } from './AccountsSettings';
 import { AIPicker } from './AIPicker';
-type Data = { ai: SettingsData['ai']; telegram: { configured: boolean; chatId: string }; automation: SettingsData['automation'] };
+import type { AIModelCatalog } from '../server/ai-models';
+type Data = { models?: AIModelCatalog; ai: SettingsData['ai']; telegram: { configured: boolean; chatId: string }; automation: SettingsData['automation'] };
 async function request(path: string, body?: unknown, method = 'POST') {
   const r = await fetch('/api/settings' + path, { signal: AbortSignal.timeout(15_000), ...(body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json', 'X-Linko-Request': '1' }, body: JSON.stringify(body) }) });
   const data = await r.json(); if (!r.ok) throw new Error(data.message || 'Settings could not be saved.'); return data;
@@ -57,7 +58,7 @@ export function Settings({ online, onSaved }: { online: boolean; onSaved: () => 
     <AccountsSettings online={online} onSaved={onSaved}/>
     <div className="ai-heading"><h3>AI</h3><span role="status" aria-live="polite">{online ? aiStatus : 'Offline · saved choices cannot be changed'}</span></div>
     <div className="ai-picker" aria-busy={busy}>
-      {data && (['everyday','fixit'] as const).map(slot => <AIPicker key={slot} slot={slot} choice={data.ai[slot]} disabled={busy || !online}
+      {data && (['everyday','fixit'] as const).map(slot => <AIPicker key={slot} slot={slot} choice={data.ai[slot]} disabled={busy || !online} models={data.models || { codex: [], claude: [] }}
         onChoose={choice => choose(slot, choice)}/>)}
     </div>
     {!data && <button className="button ghost" disabled={busy || !online} onClick={() => void act(load)}>Retry settings</button>}

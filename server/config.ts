@@ -8,7 +8,7 @@ chmodSync(privateDir, 0o700);
 export const config = {
   port: Number(process.env.PORT || 4310), host: process.env.HOST || '127.0.0.1',
   codexBinary: process.env.LINKO_CODEX_BINARY || 'codex', claudeBinary: process.env.LINKO_CLAUDE_BINARY || 'claude',
-  codexTimeout: Number(process.env.LINKO_CODEX_TIMEOUT_MS || 150_000),
+  codexTimeout: Number(process.env.LINKO_CODEX_TIMEOUT_MS || 180_000),
   publicOrigin: process.env.LINKO_PUBLIC_ORIGIN || '',
   // An unset value keeps the origin-dependent default; only exact false opts out.
   panelAuth: process.env.LINKO_PANEL_AUTH === 'false' ? false : process.env.LINKO_PANEL_AUTH === 'true' ? true : undefined,

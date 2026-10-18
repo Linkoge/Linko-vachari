@@ -140,7 +140,7 @@ test('tree selection sends item, price, cover and filtered categories to Everyda
   let answer = { confident: true, path: categories[0].path, candidates: [] as string[][] }, calls = 0;
   const f = fixture((async (_schema, _instructions, input, slot, _settings, images) => {
     calls++; const data = JSON.parse(input); assert.equal(slot, 'everyday'); assert.equal(data.price, '25'); assert.equal(data.title, 'Studio lamp');
-    assert.deepEqual(images, [join(privateDir, 'photos', 'cover.jpg')]); assert.deepEqual(data.categories, categories.map(({ id, path }) => ({ id, path }))); return answer;
+    assert.deepEqual(images, [join(privateDir, 'photos', 'cover.jpg')]); assert.deepEqual(data.categories, categories.map(({ path }) => path)); return answer;
   }) as typeof ask);
   const flow = f.flow(); flow.categories = new CategoryTree(join(f.dir, 'tree.json'));
   writeFileSync(flow.categories.file, JSON.stringify({ fetchedAt: Date.now(), categories }));
@@ -154,7 +154,7 @@ test('tree selection sends item, price, cover and filtered categories to Everyda
     answer = { confident: false, path: [], candidates: [] }; await flow.analyze(d); assert.equal(fallback, 2);
     const large = { fetchedAt: Date.now(), categories: Array.from({ length: 400 }, (_, i) => ({ id: '' + i, path: [i === 390 ? 'Studio lamps' : `Other ${i}`], url: `https://mymarket.ge/c/${i}/` })) };
     const list = flow.categories.shortlist(large, d.title); assert.equal(list.length, 160); assert.equal(list[0].id, '390');
-    assert.equal(flow.categories.shortlist(large, 'ქართული აღწერა').length, 400, 'no text overlap must not select an arbitrary prefix');
+    assert.equal(flow.categories.shortlist(large, 'ქართული აღწერა').length, 160, 'no-overlap prompts must stay bounded');
   } finally { f.close(); }
 });
 
