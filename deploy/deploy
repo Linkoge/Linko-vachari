@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Build DEPLOY_COMMIT of DEPLOY_REPO into releases/<timestamp>-<commit>/app, install the unit, switch
+# releases/current atomically and restart the user service. Health checking is deploy/health's job.
+# Optional: DEPLOY_PACKAGE_MANAGER (default "corepack pnpm"), DEPLOY_KEEP_RELEASES (default 5),
+# DEPLOY_STEP_TIMEOUT_SECONDS (default 900).
+set -euo pipefail
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+
+[ -n "${DEPLOY_REPO:-}" ] || die "DEPLOY_REPO is required"
+[ -n "${DEPLOY_COMMIT:-}" ] || die "DEPLOY_COMMIT is required"
+case "$DEPLOY_COMMIT" in -*) die "invalid DEPLOY_COMMIT" ;; esac
+sha="$(git -C "$DEPLOY_REPO" rev-parse --verify --quiet "$DEPLOY_COMMIT^{commit}")" || die "unknown commit $DEPLOY_COMMIT"
+
+mkdir -p "$RELEASES_DIR" "$UNIT_DIR"
+exec 9>"$RELEASES_DIR/.deploy.lock"
+flock -n 9 || die "another deploy is running"
+
+read -ra pm <<< "${DEPLOY_PACKAGE_MANAGER:-corepack pnpm}"
+step_timeout="${DEPLOY_STEP_TIMEOUT_SECONDS:-900}"
+id="$(date -u +%Y%m%d%H%M%S)-${sha:0:12}"
+release="$RELEASES_DIR/$id"
+[ ! -e "$release" ] || die "release $id already exists"
+
+built=0
+cleanup() { if [ "$built" != 1 ]; then rm -rf "$release"; fi; }
+trap cleanup EXIT
+
+previous="$(active_release)"
+mkdir -p "$release/app"
+git -C "$DEPLOY_REPO" archive "$sha" | tar -x -C "$release/app"
+printf 'commit=%s\ncreated_at=%s\n' "$sha" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$release/manifest.env"
+
+grep -q "releases/current/app" "$release/app/deploy/linko-mymarketer.service" || die "commit's unit file does not run from releases/current/app"
+(
+  cd "$release/app"
+  CI=true timeout "$step_timeout" "${pm[@]}" install --frozen-lockfile
+  CI=true timeout "$step_timeout" "${pm[@]}" build
+) >&2
+built=1
+
+# Install the unit from the release itself, then switch and restart.
+unit_tmp="$UNIT_DIR/.$SERVICE_NAME.$$"
+cp "$release/app/deploy/linko-mymarketer.service" "$unit_tmp"
+mv -T "$unit_tmp" "$UNIT_PATH"
+systemctl_user daemon-reload
+switch_current "$id"
+systemctl_user restart "$SERVICE_NAME"
+
+# Prune only old releases created by this script; never the new, previous or current one.
+keep="${DEPLOY_KEEP_RELEASES:-5}"
+if [[ "$keep" =~ ^[0-9]+$ ]]; then
+  mapfile -t old < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/[0-9]{14}-[0-9a-f]{12}' -printf '%f\n' | sort -r | tail -n +"$((keep + 1))")
+  for name in "${old[@]}"; do
+    if [ "$name" != "$id" ] && [ "$name" != "$previous" ]; then rm -rf "${RELEASES_DIR:?}/$name"; fi
+  done
+fi
+echo "deployed $id ($sha)"

@@ -1,4 +1,4 @@
-# Candidate only. Operator must pin WorkingDirectory to the prepared app artifact.
+# Installed by deploy/deploy. releases/current is an atomically switched symlink to the active release.
 [Unit]
 Description=Linko MyMarketer private tailnet panel
 After=network-online.target tailscaled.service
@@ -6,11 +6,12 @@ After=network-online.target tailscaled.service
 [Service]
 Type=simple
 User=codex
-WorkingDirectory=/home/codex/.local/share/linko-mymarketer/releases/mymarketer-codex-tailnet-20261014-v2/app
+WorkingDirectory=/home/codex/.local/share/linko-mymarketer/releases/current/app
 EnvironmentFile=/home/codex/.config/linko-mymarketer/runtime.env
 Environment=NODE_ENV=production
 Environment=PATH=/home/codex/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/corepack pnpm start
+# The release id reported by /api/health is the real release directory name behind the current symlink.
+ExecStart=/usr/bin/bash -c 'LINKO_RELEASE_ID="$$(basename "$$(dirname "$$(pwd -P)")")" exec /usr/bin/corepack pnpm start'
 Restart=on-failure
 RestartSec=5
 UMask=0077

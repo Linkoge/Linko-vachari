@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Record the active release and copy the private data directory into DEPLOY_BACKUP_DIR.
+# Environment: DEPLOY_BACKUP_DIR (required); optional DEPLOY_DATA_DIR, LINKO_DEPLOY_ROOT, DEPLOY_ENV_FILE.
+set -euo pipefail
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+
+[ -n "${DEPLOY_BACKUP_DIR:-}" ] || die "DEPLOY_BACKUP_DIR is required"
+mkdir -p "$DEPLOY_BACKUP_DIR"
+chmod 700 "$DEPLOY_BACKUP_DIR"
+
+source_dir="$(data_dir)"
+previous="$(active_release)"
+
+rm -rf "$DEPLOY_BACKUP_DIR/data.partial"
+if [ -d "$source_dir" ]; then
+  cp -a "$source_dir" "$DEPLOY_BACKUP_DIR/data.partial"
+else
+  log "private data directory does not exist yet; recording an empty backup"
+  mkdir "$DEPLOY_BACKUP_DIR/data.partial"
+fi
+rm -rf "$DEPLOY_BACKUP_DIR/data"
+mv "$DEPLOY_BACKUP_DIR/data.partial" "$DEPLOY_BACKUP_DIR/data"
+if [ -r "$UNIT_PATH" ]; then cp -p "$UNIT_PATH" "$DEPLOY_BACKUP_DIR/unit.service"; fi
+
+record="$DEPLOY_BACKUP_DIR/record.env.partial"
+{
+  printf 'previous_release=%s\n' "$previous"
+  printf 'data_dir=%s\n' "$source_dir"
+  printf 'created_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "$record"
+mv "$record" "$DEPLOY_BACKUP_DIR/record.env"
+log "backup recorded: previous release '${previous:-none}', data copied"

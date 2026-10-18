@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Succeed once the service answers HTTP (any status below 500) within the retry window.
+# Optional: DEPLOY_HEALTH_URL (default http://127.0.0.1:4310/api/health), DEPLOY_HEALTH_WINDOW_SECONDS (60),
+# DEPLOY_HEALTH_INTERVAL_SECONDS (2), DEPLOY_HEALTH_REQUEST_SECONDS (10).
+set -uo pipefail
+
+url="${DEPLOY_HEALTH_URL:-http://127.0.0.1:4310/api/health}"
+window="${DEPLOY_HEALTH_WINDOW_SECONDS:-60}"
+interval="${DEPLOY_HEALTH_INTERVAL_SECONDS:-2}"
+request="${DEPLOY_HEALTH_REQUEST_SECONDS:-10}"
+
+deadline=$((SECONDS + window))
+status=000
+while :; do
+  status="$(curl --silent --output /dev/null --max-time "$request" --write-out '%{http_code}' "$url" 2>/dev/null)" || status=000
+  if [[ "$status" =~ ^[1-4][0-9][0-9]$ ]]; then
+    echo "healthy: $url answered HTTP $status"
+    exit 0
+  fi
+  [ "$SECONDS" -lt "$deadline" ] || break
+  sleep "$interval"
+done
+echo "unhealthy: $url did not answer (last status $status) within ${window}s" >&2
+exit 1

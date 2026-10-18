@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Point releases/current back at the release recorded by deploy/backup and restart the service.
+# Environment: DEPLOY_BACKUP_DIR (required). Set DEPLOY_RESTORE_DATA=1 to also restore the backed-up data directory
+# (off by default: it would discard anything written since the backup).
+set -euo pipefail
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
+
+[ -n "${DEPLOY_BACKUP_DIR:-}" ] || die "DEPLOY_BACKUP_DIR is required"
+record="$DEPLOY_BACKUP_DIR/record.env"
+[ -r "$record" ] || die "no backup record in DEPLOY_BACKUP_DIR"
+previous="$(record_value "$record" previous_release)"
+[ -n "$previous" ] || die "backup record has no previous release to restore"
+[[ "$previous" =~ $RELEASE_ID_PATTERN ]] || die "backup record has an invalid release id"
+[ -d "$RELEASES_DIR/$previous/app" ] || die "previous release $previous is no longer present"
+
+if [ "${DEPLOY_RESTORE_DATA:-0}" = "1" ]; then
+  target="$(record_value "$record" data_dir)"
+  [ -n "$target" ] && [ -d "$DEPLOY_BACKUP_DIR/data" ] || die "no data backup to restore"
+  systemctl_user stop "$SERVICE_NAME" || true
+  rm -rf "$target.rollback-partial"
+  cp -a "$DEPLOY_BACKUP_DIR/data" "$target.rollback-partial"
+  if [ -e "$target" ]; then mv -T "$target" "$target.pre-rollback.$(date -u +%Y%m%d%H%M%S)"; fi
+  mv -T "$target.rollback-partial" "$target"
+fi
+
+switch_current "$previous"
+systemctl_user daemon-reload
+systemctl_user restart "$SERVICE_NAME"
+log "rolled back to $previous"
