@@ -74,12 +74,12 @@ test('Publish accepts immediately when browser busy, resets to a fresh draft, se
     let active = 0, peak = 0; const order: string[] = [];
     f.workflow.useAccount = async () => {};
     f.workflow.prepare = async d => { active++; peak = Math.max(peak, active); order.push(d.id); await new Promise(r => setTimeout(r, 15)); d.state = 'ready'; };
-    f.workflow.publish = async d => { try { const fp = f.store.claim(d); d.state = 'published'; f.store.finish(fp, 'published'); } finally { active--; } };
+    f.workflow.publish = async d => { try { const fp = f.store.claim(d); d.state = 'published'; d.receipt = { url: 'https://mymarket.ge/pr/900/lamp', at: new Date().toISOString(), evidence: 'Fixture receipt' }; f.store.finish(fp, 'published', d.receipt); } finally { active--; } };
     f.workflow.busy = false;
     await Promise.all([f.queue.drain(), f.queue.drain()]); await f.queue.drain(); await f.queue.drain();
     assert.equal(peak, 1); assert.deepEqual(order, [a.id, b.id, c.id]);
     assert.equal(f.store.get(a.id).state, 'published'); assert.equal(f.store.get(b.id).state, 'blocked'); assert.equal(f.store.get(c.id).state, 'published');
-    const listings: any = await (await fetch(base + '/listings')).json(); assert.deepEqual(listings.jobs.map((j: any) => j.status), ['published', 'failed', 'published']);
+    const listings: any = await (await fetch(base + '/listings')).json(); assert.deepEqual(listings.listings.map((l: any) => l.status), ['live', 'failed', 'live']);
     config.publish = false; const disabled = await item(f.store);
     assert.equal((await fetch(`${base}/drafts/${disabled.id}/publish`, { method: 'POST', headers, body: JSON.stringify({ revision: disabled.revision }) })).status, 409);
     assert.equal(f.store.get(disabled.id).state, 'draft');

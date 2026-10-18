@@ -13,7 +13,8 @@ import { WorkflowError } from './types';
 import { AccessBoundary } from './access';
 import { providerStatus } from './codex';
 import { addAccountSchema } from './accounts';
-import { aiSchema } from './settings';
+import { aiSchema, automationSchema } from './settings';
+import { myListings } from './listing-summary';
 import { PublishQueue } from './queue';
 import { ListingMonitor } from './listings';
 const patchSchema = z.object({ accountId: z.string().min(1).max(50).optional(), revision: z.number().int(), title: z.string().max(120), description: z.string().max(6000), price: z.string().regex(/^(?:\d{0,8})(?:\.\d{0,2})?$/), currency: z.enum(['GEL', 'USD']), model: z.string().max(200), condition: z.string().max(100), location: z.string().max(200), category: z.array(z.string().max(120)).max(8), facts: z.record(z.string().max(100), z.string().max(500)), photoOrder: z.array(z.string().max(50)).max(8).optional(), coverId: z.string().max(50) });
@@ -25,12 +26,12 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   app.use(access.middleware);
   app.use(express.json({ limit: '32kb' }));
   app.get('/api/auth/status', (req, res) => res.json(access.status(req)));
-  app.get('/api/health', (_req, res) => res.json({ application: 'linko-mymarketer', version: '0.2.0', releaseId: config.releaseId, automationBusy: workflow.busy, publishingEnabled: config.publish }));
+  app.get('/api/health', (_req, res) => res.json({ application: 'linko-mymarketer', version: '0.2.0', releaseId: config.releaseId, automationBusy: workflow.busy, publishingEnabled: workflow.settings.load().automation.publish }));
   app.post('/api/auth/login', (req, res) => access.login(req, res));
   app.post('/api/auth/logout', (req, res) => access.logout(req, res));
   app.get('/api/config', async (req, res) => {
     const choice = workflow.settings.load().ai.everyday, status = await providerStatus(choice.provider);
-    res.json({ everyday: status, codex: { available: choice.provider === 'codex' && status.installed, chatgptSignedIn: choice.provider === 'codex' && status.signedIn }, publishEnabled: config.publish, mode: access.origin ? 'tailnet' : 'local', publicOrigin: access.origin });
+    res.json({ everyday: status, codex: { available: choice.provider === 'codex' && status.installed, chatgptSignedIn: choice.provider === 'codex' && status.signedIn }, publishEnabled: workflow.settings.load().automation.publish, mode: access.origin ? 'tailnet' : 'local', publicOrigin: access.origin });
   });
   app.get('/api/settings', async (_req, res) => {
     const [codex, claude] = await Promise.all([providerStatus('codex'), providerStatus('claude')]);
@@ -61,6 +62,10 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the current job before changing AI settings.');
     const data = workflow.settings.load(); data.ai = aiSchema.parse(req.body); res.json(workflow.settings.save(data));
   });
+  app.put('/api/settings/automation', (req, res) => {
+    const data = workflow.settings.load(); data.automation = automationSchema.parse(req.body);
+    res.json(workflow.settings.save(data));
+  });
   app.put('/api/settings/telegram', (req, res) => {
     const patch = z.object({ token: z.string().max(200).optional(), chatId: z.string().regex(/^-?\d*$|^$/).max(100) }).strict().parse(req.body);
     const data = workflow.settings.load(); data.telegram.chatId = patch.chatId;
@@ -82,15 +87,25 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     if (workflow.auth.message(text) === 'login') workflow.login();
     res.json(workflow.auth.status());
   });
-  app.get('/api/drafts', (_req, res) => res.json({ drafts: store.all().filter(d => !['published', 'unknown', 'publishing', 'queued', 'analyzing', 'preparing'].includes(d.state)) }));
+  app.get('/api/drafts', (_req, res) => {
+    const history = new Set(workflow.archive.all().map(r => r.id));
+    res.json({ drafts: store.all().filter(d => !history.has(d.id) && !['published', 'unknown', 'publishing', 'queued', 'analyzing', 'preparing'].includes(d.state)) });
+  });
   app.post('/api/drafts', (_req, res) => res.status(201).json(store.create(workflow.accounts.defaultId || undefined)));
-  app.get('/api/listings', (_req, res) => res.json({ autoRelistEnabled: config.autoRelist && config.publish, jobs: queue.all().filter(j => j.operation === 'submit').flatMap(j => { try { const d = store.get(j.draft); return [{ ...j, title: d.title, accountId: d.accountId, state: d.state, message: d.message }]; } catch { return []; } }), records: workflow.archive.all().map(({ recipe, ...r }) => ({ ...r, accountId: recipe.accountId, title: recipe.title })) }));
+  app.get('/api/listings', (_req, res) => res.json({ listings: myListings(workflow, queue) }));
+  app.get('/api/listings/:id/cover', (req, res) => {
+    const d = workflow.archive.get(req.params.id).recipe;
+    const photo = d.photos.find(p => p.id === d.coverId) || d.photos[0];
+    if (!photo) throw new WorkflowError('NOT_FOUND', 'Photo not found.');
+    res.type('jpeg').send(readFileSync(join(privateDir, 'photos', photo.id + '.jpg')));
+  });
   app.post('/api/listings/check', (_req, res) => {
     if (workflow.busy || workflow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review before checking listings.');
     void monitor.check().catch(() => {}); res.status(202).json({ accepted: true });
   });
   app.post('/api/listings/:id/delete', async (req, res) => {
     if (req.body.confirm !== true) throw new WorkflowError('CONFIRM', 'Confirm deleting this listing from MyMarket permanently.');
+    if (queue.all().some(j => j.draft === req.params.id && j.operation === 'submit' && j.status === 'queued')) return res.json(queue.cancel(req.params.id));
     res.json(await workflow.deleteListing(req.params.id));
   });
   app.patch('/api/listings/:id', (req, res) => {
@@ -105,6 +120,7 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   app.get('/api/drafts/:id', (req, res) => res.json(store.get(req.params.id)));
   const editable = (id: string) => {
     const d = store.get(id);
+    if (workflow.archive.all().some(r => r.id === id && r.deleteRequestedAt)) throw new WorkflowError('LOCKED', 'This listing was deleted by you.');
     if (queue.active(id) || ['analyzing', 'preparing', 'publishing', 'published', 'unknown'].includes(d.state)) throw new WorkflowError('LOCKED', 'This draft is locked while running or after a publishing attempt. Wait or check your MyMarket receipt.');
     return d;
   };
@@ -180,7 +196,7 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     if (!d.photos.length || !d.photos.some(p => p.id === d.coverId) || !d.description.trim() || !(Number(d.price) > 0)) throw new WorkflowError('INPUT', 'Add photos, choose a main photo, and provide a description and a price above zero.');
     if (req.body.revision !== d.revision) throw new WorkflowError('CONFLICT', 'Your draft changed. Save the latest details first.');
     if (operation === 'publish') {
-      if (!config.publish) throw new WorkflowError('DISABLED', 'Publishing is disabled on this installation.');
+      if (!workflow.settings.load().automation.publish) throw new WorkflowError('DISABLED', 'Publishing is disabled in Settings.');
       if (!d.title.trim()) throw new WorkflowError('INPUT', 'Add a title.');
       const job = queue.enqueue(d.id, 'submit');
       // Persist the next independent draft before responding; the editor can reset in one round trip.

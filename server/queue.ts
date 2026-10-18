@@ -11,8 +11,23 @@ export class PublishQueue {
   get store() { return this.workflow.store; }
   all(): Job[] { return this.store.db.prepare('SELECT * FROM jobs ORDER BY createdAt, rowid').all() as unknown as Job[]; }
   active(id: string) { return this.all().some(j => j.draft === id && ['queued', 'running'].includes(j.status)); }
+  cancel(id: string) {
+    const job = this.all().find(j => j.draft === id && j.operation === 'submit' && j.status === 'queued');
+    if (!job) throw new WorkflowError('LOCKED', 'This listing has already started publishing.');
+    const d = this.store.get(id);
+    this.store.db.exec('BEGIN IMMEDIATE');
+    try {
+      const r = this.workflow.archive.snapshot(d);
+      r.enabled = false; r.status = 'deleted_by_owner'; r.deleteRequestedAt = Date.now();
+      r.message = 'Owner cancelled the queued listing. Never publish or re-list.';
+      this.workflow.archive.write(r); this.finish(job, 'cancelled');
+      d.state = 'blocked'; this.store.event(d, r.message);
+      this.store.db.exec('COMMIT'); return r;
+    } catch (e) { this.store.db.exec('ROLLBACK'); throw e; }
+  }
   enqueue(id: string, operation: Job['operation']) {
     if (this.active(id)) throw new WorkflowError('LOCKED', 'This draft already has a queued job.');
+    if (this.workflow.archive.all().some(r => r.id === id && r.deleteRequestedAt)) throw new WorkflowError('LOCKED', 'This listing was deleted by you and cannot be published again.');
     const d = this.store.get(id), job: Job = { id: randomUUID(), draft: id, operation, status: 'queued', createdAt: Date.now() };
     this.store.db.exec('BEGIN IMMEDIATE');
     try {

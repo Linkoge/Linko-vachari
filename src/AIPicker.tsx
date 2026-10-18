@@ -21,8 +21,8 @@ function moveFocus(event: KeyboardEvent<HTMLDivElement>) {
   buttons[next]?.focus();
 }
 
-export function AIPicker({ slot, choice, disabled, status, onChoose }: {
-  slot: AISlot; choice: AIChoice; disabled: boolean; status: string;
+export function AIPicker({ slot, choice, disabled, onChoose }: {
+  slot: AISlot; choice: AIChoice; disabled: boolean;
   onChoose: (choice: AIChoice) => Promise<boolean>;
 }) {
   const label = slot === 'everyday' ? 'Everyday' : 'Fix-it';
@@ -30,7 +30,6 @@ export function AIPicker({ slot, choice, disabled, status, onChoose }: {
   const [provider, setProvider] = useState<AIChoice['provider']>(choice.provider);
   return <fieldset className="ai-slot" disabled={disabled}>
     <legend>{label}</legend>
-    <p className="ai-slot-description">{slot === 'everyday' ? 'Categories and field matching.' : 'Repairs a script when the page changes.'}</p>
     {(['codex', 'claude'] as const).map(p => {
       const active = choice.provider === p;
       const choices = [...models[p]];
@@ -49,13 +48,10 @@ export function AIPicker({ slot, choice, disabled, status, onChoose }: {
         </div>
       </div>;
     })}
-    <p className="ai-saved-choice"><strong>{names[choice.provider]}</strong> · {choice.model} · {title(choice.effort)}</p>
-    <p className="ai-provider-status">{status}</p>
     <details className="ai-custom"><summary>Use another model</summary>
       <form onSubmit={event => { event.preventDefault(); void onChoose({ provider, model: custom.trim(), effort: choice.effort }).then(saved => { if (saved) setCustom(''); }); }}>
         <label>Provider<select aria-label={`${label} custom provider`} value={provider} onChange={e => setProvider(e.target.value as AIChoice['provider'])}><option value="codex">Codex</option><option value="claude">Claude</option></select></label>
         <label>Exact model ID<input aria-label={`${label} custom model`} value={custom} onChange={e => setCustom(e.target.value)} required maxLength={100} pattern="[a-zA-Z0-9][a-zA-Z0-9._:\/\-]{0,99}" autoCapitalize="none" autoComplete="off" spellCheck={false}/></label>
-        <small>This draft is applied only when you choose Save model. Model access is checked on use.</small>
         <button type="submit" className="button ghost" disabled={!custom.trim()}>Save model</button>
       </form>
     </details>

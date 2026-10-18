@@ -9,7 +9,7 @@ test('protected panel sign-in is distinct from marketplace login; automatic acco
   await page.getByLabel('Panel password').fill(panelCode); await page.getByRole('button', { name: 'Sign in to panel' }).click();
   await expect(page.getByRole('heading', { name: 'New listing', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await expect(page.getByRole('dialog').getByLabel('MyMarket accounts')).toBeVisible();
+  await expect(page.getByLabel('MyMarket accounts')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open private MyMarket browser' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Sign out of Linko panel' }).click();
   await expect(page.getByRole('heading', { name: 'Sign in to Linko' })).toBeVisible();

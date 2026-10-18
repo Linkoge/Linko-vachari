@@ -5,7 +5,7 @@ test('Settings saves several accounts privately and draft account choice persist
   await page.goto('/');
   await page.screenshot({ path: info.outputPath('accounts-overview.png'), fullPage: true });
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  const dialog = page.getByRole('dialog'), accounts = dialog.getByLabel('MyMarket accounts');
+  const accounts = page.getByLabel('MyMarket accounts');
   for (const label of ['Personal', 'Shop']) {
     await accounts.getByLabel('Account label').fill(label);
     await accounts.getByLabel('Account email').fill('owner@x.io');
@@ -18,7 +18,7 @@ test('Settings saves several accounts privately and draft account choice persist
   await accounts.screenshot({ path: info.outputPath('accounts-settings.png') });
   const response = await page.request.get('/api/accounts'); const raw = await response.text(); expect(raw).not.toContain(marker); expect(raw).not.toContain('owner@x.io');
   const list = JSON.parse(raw).accounts;
-  await page.getByRole('button', { name: 'Close setup' }).click();
+  await page.getByRole('button', { name: 'New listing', exact: true }).click();
   await page.getByRole('button', { name: 'New draft' }).click();
   await expect(page.getByLabel('Listing account')).toHaveValue(list.find((a: any) => a.label === 'Shop').id);
   await page.getByLabel('Listing account').selectOption(list.find((a: any) => a.label === 'Personal').id);

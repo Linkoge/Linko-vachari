@@ -14,7 +14,6 @@ export function AccountsSettings({ online, onSaved }: { online: boolean; onSaved
     catch (e) { setMessage((e as Error).message); } finally { setBusy(false); }
   }
   return <section aria-label="MyMarket accounts"><h3>MyMarket accounts</h3>
-    <p>Each account has its own saved browser session. Email and password stay privately on this server.</p>
     {accounts.map(a => <div key={a.id}><strong>{a.label}</strong> <span>{a.hint} · {a.activeListings} of 5 free listings used</span>
       <button type="button" className="text-button" disabled={busy || !online} onClick={() => { if (confirm(`Remove ${a.label}? Its listing history will remain and automation for it will stop.`)) void change('accounts/' + a.id, 'DELETE'); }}>Remove account {a.label}</button></div>)}
     <form autoComplete="off" onSubmit={e => { e.preventDefault(); const input = { label, identifier: email, password }; setPassword(''); setEmail(''); setLabel(''); void change('accounts', 'POST', input); }}>
@@ -23,7 +22,6 @@ export function AccountsSettings({ online, onSaved }: { online: boolean; onSaved
       <label>Account password<input type="password" required autoComplete="new-password" maxLength={256} value={password} onChange={e => setPassword(e.target.value)} disabled={busy || !online}/></label>
       <button className="button primary" disabled={busy || !online}>Add MyMarket account</button>
     </form>
-    <button type="button" className="button ghost" disabled={busy || !online} onClick={async () => { setBusy(true); setMessage('Refreshing category tree…'); try { const t = await request('settings/categories/refresh', 'POST', {}); setMessage(`Saved ${t.count} categories.`); } catch (e) { setMessage((e as Error).message); } finally { setBusy(false); } }}>Refresh category tree</button>
     {message && <p role="status">{message}</p>}
   </section>;
 }

@@ -10,7 +10,7 @@ const initialAI = () => ({ everyday: { provider: 'codex', model: 'small-choice',
 for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }, { width: 320, height: 740 }]) {
   test(`AI picker and Telegram persist at ${size.width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize(size);
-    let saved = { ai: initialAI(), telegram: { configured: false, chatId: '' } }; let sent = 0, detected = 0;
+    let saved = { ai: initialAI(), telegram: { configured: false, chatId: '' }, automation: { publish: false, autoRelist: false } }; let sent = 0, detected = 0;
     const writes: unknown[] = [], marker = randomUUID();
     await page.route('**/api/settings', r => r.fulfill({ json: { ...saved, providers } }));
     await page.route('**/api/settings/ai', r => { writes.push(r.request().postDataJSON()); saved = { ...saved, ai: r.request().postDataJSON() }; return r.fulfill({ json: saved }); });
@@ -23,18 +23,17 @@ for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }, 
     await page.goto('/');
     await page.screenshot({ path: testInfo.outputPath(`overview-${size.width}.png`), fullPage: true });
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    const dialog = page.getByRole('dialog'), picker = dialog.locator('.ai-picker');
+    const dialog = page.getByRole('main'), picker = dialog.locator('.ai-picker');
     await expect(dialog.getByRole('heading', { name: 'AI', exact: true })).toBeVisible();
-    // The floating assistant must stay behind the settings backdrop on phones.
-    expect(await page.locator('.modal-backdrop').evaluate(el => {
-      const box = document.querySelector('.agent-toggle')!.getBoundingClientRect();
-      return el.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
-    })).toBe(true);
+    await expect(page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button')).toHaveText(['New listing', 'Drafts', 'My listings', 'Settings']);
+    await expect(page.getByText(/CLI not installed|@BotFather|Refresh category tree|stored only|Notification failures/)).toHaveCount(0);
+    await expect(page.locator('.agent-dock,.setup-status,.ai-provider-status,.ai-help,.ai-slot-description')).toHaveCount(0);
+    await expect(dialog.getByRole('heading')).toHaveText(['Settings', 'MyMarket accounts', 'AI', 'Telegram']);
+    await expect(dialog.getByRole('checkbox')).toHaveCount(2);
     await expect(picker.locator('fieldset')).toHaveCount(2);
     await expect(picker.locator('.model-choice-row[role=group]')).toHaveCount(8);
     await expect(picker.getByRole('button', { name: 'Everyday Codex small-choice', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(picker.getByRole('button', { name: 'Fix-it Claude Opus', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await expect(picker.getByText(/CLI not installed/)).toBeVisible();
     await expect(picker.getByRole('button', { name: 'Everyday Claude Low', exact: true })).toBeDisabled();
     await expect(picker.getByRole('button', { name: 'Fix-it Codex High', exact: true })).toBeDisabled();
     for (const row of await picker.locator('.model-choice-row[role=group]').all()) {
@@ -62,14 +61,14 @@ for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }, 
     await page.keyboard.press('End'); await expect(picker.getByRole('button', { name: 'Everyday Codex Astra', exact: true })).toBeFocused();
     expect(writes).toHaveLength(3);
     await picker.screenshot({ path: testInfo.outputPath(`ai-${size.width}.png`) });
-    await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused();
+    await page.getByRole('button', { name: 'New listing', exact: true }).click();
+    await expect(page.locator('.ai-picker')).toHaveCount(0);
     await page.reload(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
     await expect(picker.getByRole('button', { name: 'Everyday Claude Sonnet', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(picker.getByRole('button', { name: 'Everyday Claude Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await expect(picker.getByRole('button', { name: 'Fix-it Claude Opus', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await dialog.getByLabel('Bot token').fill(marker); await dialog.getByRole('button', { name: 'Save Telegram', exact: true }).click();
-    await expect(dialog.getByLabel('Bot token')).toHaveValue(''); await expect(dialog.getByText('@BotFather')).toBeAttached();
+    await expect(dialog.getByLabel('Bot token')).toHaveValue('');
     await dialog.getByRole('button', { name: 'Detect chat ID', exact: true }).click(); await expect(dialog.getByLabel('Chat ID', { exact: true })).toHaveValue('123');
     await dialog.getByRole('button', { name: 'Save Telegram', exact: true }).click(); await dialog.getByRole('button', { name: 'Send test message', exact: true }).click();
     await expect(dialog.getByText('Test message sent.', { exact: true })).toBeVisible(); expect(sent).toBe(1); expect(detected).toBe(1);
@@ -84,7 +83,7 @@ for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }, 
 
 test('pending, rejected and lost saves never show an unconfirmed selection or switch provider', async ({ page, context }) => {
   let ai = initialAI(), available = true;
-  await page.route('**/api/settings', r => available ? r.fulfill({ json: { ai, telegram: { configured: false, chatId: '' }, providers } }) : r.abort());
+  await page.route('**/api/settings', r => available ? r.fulfill({ json: { ai, telegram: { configured: false, chatId: '' }, automation: { publish: false, autoRelist: false }, providers } }) : r.abort());
   let finish: () => void = () => {};
   await page.route('**/api/settings/ai', async r => {
     await new Promise<void>(resolve => { finish = resolve; });
@@ -146,4 +145,40 @@ test('custom models preserve the exact ID, effort and independent slot through r
   await page.reload(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await expect(slot.getByRole('button', { name: 'Fix-it Claude my-exact-model', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(slot.getByRole('button', { name: 'Fix-it Claude Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('publish and auto-relist toggles save through the real API and survive navigation and reload', async ({ page, request }) => {
+  const initial = await (await request.get('/api/settings')).json();
+  try {
+    await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const publish = page.getByRole('checkbox', { name: 'Publish', exact: true });
+    const relist = page.getByRole('checkbox', { name: 'Auto-relist', exact: true });
+    await expect(publish).toBeEnabled();
+    await publish.click(); await expect(publish).toBeChecked({ checked: !initial.automation.publish });
+    await relist.click(); await expect(relist).toBeChecked({ checked: !initial.automation.autoRelist });
+    await expect(relist).toBeEnabled();
+    const saved = await (await request.get('/api/settings')).json();
+    expect(saved.automation).toEqual({ publish: !initial.automation.publish, autoRelist: !initial.automation.autoRelist });
+    expect(saved.ai).toEqual(initial.ai); expect(saved.telegram).toEqual(initial.telegram);
+    await page.getByRole('button', { name: 'Drafts', exact: true }).click();
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(publish).toBeChecked({ checked: !initial.automation.publish });
+    await page.reload(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(relist).toBeChecked({ checked: !initial.automation.autoRelist });
+    await expect(publish).toBeChecked({ checked: !initial.automation.publish });
+  } finally {
+    const reset = await request.put('/api/settings/automation', { headers: { 'X-Linko-Request': '1' }, data: initial.automation });
+    expect(reset.status()).toBe(200);
+  }
+});
+
+test('a rejected automation save restores server state and offline toggles stay disabled', async ({ page, context }) => {
+  const automation = { publish: false, autoRelist: true };
+  await page.route('**/api/settings', r => r.fulfill({ json: { ai: initialAI(), telegram: { configured: false, chatId: '' }, automation } }));
+  await page.route('**/api/settings/automation', r => r.fulfill({ status: 500, json: { message: 'Settings could not be saved.' } }));
+  await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const publish = page.getByRole('checkbox', { name: 'Publish', exact: true });
+  await publish.click(); await expect(page.getByRole('alert')).toContainText('Settings could not be saved.');
+  await expect(publish).not.toBeChecked(); await expect(page.getByRole('checkbox', { name: 'Auto-relist', exact: true })).toBeChecked();
+  await context.setOffline(true); await expect(publish).toBeDisabled();
 });

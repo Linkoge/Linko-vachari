@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SettingsData, AIChoice, AISlot } from '../server/settings';
 import { AccountsSettings } from './AccountsSettings';
 import { AIPicker } from './AIPicker';
-type Data = { ai: SettingsData['ai']; telegram: { configured: boolean; chatId: string }; providers: Record<AIChoice['provider'], { installed: boolean; signedIn: boolean; message: string }> };
+type Data = { ai: SettingsData['ai']; telegram: { configured: boolean; chatId: string }; automation: SettingsData['automation'] };
 async function request(path: string, body?: unknown, method = 'POST') {
   const r = await fetch('/api/settings' + path, { signal: AbortSignal.timeout(15_000), ...(body === undefined ? {} : { method, headers: { 'Content-Type': 'application/json', 'X-Linko-Request': '1' }, body: JSON.stringify(body) }) });
   const data = await r.json(); if (!r.ok) throw new Error(data.message || 'Settings could not be saved.'); return data;
@@ -41,27 +41,42 @@ export function Settings({ online, onSaved }: { online: boolean; onSaved: () => 
       restoreFocus.current = focused; saving.current = false; setBusy(false);
     }
   }
+  async function toggle(key: keyof SettingsData['automation']) {
+    if (!data || busy || !online) return;
+    await act(async () => {
+      try {
+        const saved = await request('/automation', { ...data.automation, [key]: !data.automation[key] }, 'PUT');
+        setData(d => d && { ...d, automation: saved.automation }); onSaved();
+      } catch (e) {
+        try { await load(); onSaved(); } catch { setData(undefined); }
+        throw e;
+      }
+    });
+  }
   return <div className="connection-settings">
+    <AccountsSettings online={online} onSaved={onSaved}/>
     <div className="ai-heading"><h3>AI</h3><span role="status" aria-live="polite">{online ? aiStatus : 'Offline · saved choices cannot be changed'}</span></div>
-    <p className="ai-help">Choose a model, then its thinking effort. Each tap saves. Uses your local CLI sign-in; never switches providers on failure.</p>
     <div className="ai-picker" aria-busy={busy}>
       {data && (['everyday','fixit'] as const).map(slot => <AIPicker key={slot} slot={slot} choice={data.ai[slot]} disabled={busy || !online}
-        status={data.providers[data.ai[slot].provider]?.message || 'Local sign-in status unavailable'} onChoose={choice => choose(slot, choice)}/>)}
+        onChoose={choice => choose(slot, choice)}/>)}
     </div>
     {!data && <button className="button ghost" disabled={busy || !online} onClick={() => void act(load)}>Retry settings</button>}
     {error && <p role="alert">{error}</p>}
-    <AccountsSettings online={online} onSaved={onSaved}/><h3>Telegram</h3>
-    <ol><li>Open Telegram, talk to <strong>@BotFather</strong>, use /newbot and copy the bot token below.</li><li>Open your new bot and press <strong>Start</strong>.</li><li>Save the token, then use <strong>Detect chat ID</strong> (getUpdates), choose your private chat and save again. Send a test message.</li></ol>
+    <section aria-label="Telegram"><h3>Telegram</h3>
     <label>Bot token<input type="password" autoComplete="new-password" value={token} onChange={e => setToken(e.target.value)} placeholder={data?.telegram.configured ? 'Saved privately; leave blank to keep' : 'Paste bot token'} disabled={busy || !online}/></label>
     <label>Chat ID<input inputMode="text" value={chatId} onChange={e => setChatId(e.target.value)} disabled={busy || !online}/></label>
-    <p>The token stays in the private data directory outside Git and is never returned or logged. Notification failures do not block monitoring.</p>
     <div className="settings-actions">
-      <button className="button primary" disabled={busy || !online} onClick={() => void act(async () => { const saved = await request('/telegram', { ...(token ? { token } : {}), chatId }, 'PUT'); setToken(''); setData(d => d && { ...d, telegram: saved.telegram }); setMessage('Telegram settings saved privately.'); })}>Save Telegram</button>
+      <button className="button primary" disabled={busy || !online} onClick={() => void act(async () => { const saved = await request('/telegram', { ...(token ? { token } : {}), chatId }, 'PUT'); setToken(''); setData(d => d && { ...d, telegram: saved.telegram }); setMessage('Telegram saved.'); })}>Save Telegram</button>
       <button className="button ghost" disabled={busy || !online || !data?.telegram.configured} onClick={() => void act(async () => { const result = await request('/telegram/detect', {}); setChatIds(result.chatIds); if (result.chatIds.length === 1) setChatId(result.chatIds[0]); setMessage(result.chatIds.length ? 'Choose a detected chat ID and save Telegram.' : 'No private chat found. Press Start in your bot, send it a message, and try again.'); })}>Detect chat ID</button>
       <button className="button ghost" disabled={busy || !online || !data?.telegram.configured || !data?.telegram.chatId} onClick={() => void act(async () => { const result = await request('/telegram/test', {}); if (!result.sent) throw new Error('Test message could not be delivered. Check the saved token and chat ID.'); setMessage('Test message sent.'); })}>Send test message</button>
       {data?.telegram.configured && <button className="text-button" disabled={busy || !online} onClick={() => void act(async () => { const saved = await request('/telegram', { token: '', chatId: '' }, 'PUT'); setToken(''); setChatId(''); setData(d => d && { ...d, telegram: saved.telegram }); setMessage('Telegram disconnected.'); })}>Disconnect Telegram</button>}
     </div>
     {chatIds.length > 1 && <label>Detected private chats<select value={chatId} onChange={e => setChatId(e.target.value)}><option value="">Choose</option>{chatIds.map(id => <option key={id}>{id}</option>)}</select></label>}
     {message && <p role="status">{message}</p>}
+    </section>
+    <section className="automation-settings" aria-label="Automation">
+      <label><input type="checkbox" checked={data?.automation.publish || false} disabled={!data || busy || !online} onChange={() => void toggle('publish')}/>Publish</label>
+      <label><input type="checkbox" checked={data?.automation.autoRelist || false} disabled={!data || busy || !online} onChange={() => void toggle('autoRelist')}/>Auto-relist</label>
+    </section>
   </div>;
 }

@@ -8,7 +8,7 @@ import { Telegram } from './telegram';
 import { ScriptChanged, signature, resolveStep, controls, auditRecipe, privateControl } from './replay';
 import { DeletionRunner } from './deletion';
 import { allowedUrl, isListingUrl, MarketplaceBrowser, Snapshot } from './browser';
-import { config, privateDir } from './config';
+import { privateDir } from './config';
 import { guardClick, publishLabel, sourceValue } from './policy';
 import { Store } from './store';
 import { LoginAgent } from './agent';
@@ -69,7 +69,7 @@ export class Workflow {
       if (operation === 'submit') {
         this.automatic = true;
         this.prepared = undefined; delete d.preparedRevision;
-        if (!config.publish) throw new WorkflowError('DISABLED', 'Publishing is disabled on this installation.');
+        if (!this.settings.load().automation.publish) throw new WorkflowError('DISABLED', 'Publishing is disabled on this installation.');
         if (!d.category.length) {
           d.state = 'analyzing'; this.store.event(d, 'Finding category…'); await this.analyze(d);
         }
@@ -363,8 +363,12 @@ export class Workflow {
     this.ready(d, result.snapshot);
     this.store.event(d, 'The live form is prepared. Review the actual field values below. Publishing requires your explicit click.');
   }
+  private assertPublishEnabled(d: Draft) {
+    const automation = this.settings.load().automation;
+    if (!automation.publish || (d.relistOf && !automation.autoRelist)) throw new WorkflowError('DISABLED', 'Publishing or auto-relisting is disabled in Settings.');
+  }
   async publish(d: Draft) {
-    if (!config.publish) throw new WorkflowError('DISABLED', 'Publishing is disabled on this installation. The operator must enable real publishing in the activated service; then prepare the form again.');
+    this.assertPublishEnabled(d);
     if (!this.prepared || this.prepared.id !== d.id || this.prepared.revision !== d.revision || d.preparedRevision !== d.revision || d.state !== 'ready' || Date.now() - this.prepared.at > 10 * 60_000) throw new WorkflowError('STALE', 'This form review has expired or changed. Prepare it again before publishing.');
     const page = this.browser.page!;
     const snapshot = await this.browser.snapshot(page);
@@ -377,6 +381,8 @@ export class Workflow {
     if (d.relistOf && await new ListingMonitor(this).inspect(this.archive.get(d.relistOf)) !== 'missing') {
       throw new WorkflowError('RELIST', 'The original listing is no longer confirmed missing. Inspect MyMarket before publishing a replacement.');
     }
+    // Settings may have changed while the browser/AI audits were awaiting.
+    this.assertPublishEnabled(d);
     this.archive.snapshot(d); // A writable Markdown recipe is mandatory before the irreversible submit.
     const fp = this.store.claim(d); d.state = 'publishing'; this.store.event(d, 'Submitting once to MyMarket. The app will not repeat this publishing action.');
     // Durable claim exists before the one irreversible click, even if the process crashes.

@@ -1,7 +1,6 @@
 import { mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { isListingUrl, onAuthPage } from './browser';
-import { config } from './config';
 import type { Store } from './store';
 import type { Workflow } from './workflow';
 import { Draft, WorkflowError } from './types';
@@ -156,20 +155,20 @@ export class ListingMonitor {
           if (r.missingCount >= 2 && now - r.firstMissingAt! >= MISSING_RECHECK && !r.deletionNotified) {
             r.deletionNotified = true; this.workflow.telegram.notify(`Listing confirmed deleted by MyMarket: ${r.recipe.title}. ${r.receipt!.url}`);
           }
-          if (r.missingCount >= 2 && (!config.publish || !config.autoRelist)) {
+          if (r.missingCount >= 2 && (!flow.settings.load().automation.publish || !flow.settings.load().automation.autoRelist)) {
             r.nextCheckAt = now + CHECK_INTERVAL;
-            r.message = 'Confirmed missing. Automatic re-listing is disabled in server configuration.';
+            r.message = 'Confirmed missing. Automatic re-listing is disabled in Settings.';
           }
         }
         this.archive.write(r);
-        if (r.missingCount >= 2 && now - r.firstMissingAt! >= MISSING_RECHECK && config.publish && config.autoRelist) await this.relist(r);
+        if (r.missingCount >= 2 && now - r.firstMissingAt! >= MISSING_RECHECK && flow.settings.load().automation.publish && flow.settings.load().automation.autoRelist) await this.relist(r);
       }
     } finally { flow.busy = false; }
   }
   async relist(r: ListingRecord) {
     const flow = this.workflow;
     const latest = this.archive.get(r.id);
-    if (latest.deleteRequestedAt || latest.replacementId || !latest.enabled || !config.publish || !config.autoRelist) return;
+    if (latest.deleteRequestedAt || latest.replacementId || !latest.enabled || !flow.settings.load().automation.publish || !flow.settings.load().automation.autoRelist) return;
     // Persist the one replacement ID before any browser action. Blocked/uncertain runs require human review.
     const d: Draft = { ...structuredClone(r.recipe), id: this.archive.store.create().id, revision: 0, state: 'review', events: [], relistOf: r.id };
     delete d.receipt; delete d.preparedAt; delete d.preparedRevision;

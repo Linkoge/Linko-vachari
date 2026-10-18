@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Draft } from '../server/types';
 import { readCache, writeCache, clearCache } from './cache';
-import { AgentWindow } from './AgentWindow';
+import { VerificationPrompt } from './VerificationPrompt';
 import { Settings } from './Settings';
-import { ListingRecords } from './ListingRecords';
+import { MyListings } from './MyListings';
 
 async function api<T>(path: string, body?: unknown, method = 'GET', revision?: number): Promise<T> {
   const response = await fetch('/api' + path, { method, headers: { 'X-Linko-Request': '1', ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(revision === undefined ? {} : { 'If-Match': String(revision) }) }, body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body) });
@@ -18,7 +18,8 @@ export function App() {
   const saving = useRef<Promise<Draft> | undefined>(undefined);
   const [working, setWorking] = useState(false), [saveFailed, setSaveFailed] = useState(false);
   const [online, setOnline] = useState(navigator.onLine), [error, setError] = useState('');
-  const [settings, setSettings] = useState(false), [drafts, setDrafts] = useState<Draft[]>([]);
+  const [section, setSection] = useState<'New listing' | 'Drafts' | 'My listings' | 'Settings'>('New listing');
+  const [drafts, setDrafts] = useState<Draft[]>([]);
   const [accounts, setAccounts] = useState<{ id: string; label: string; activeListings: number }[]>([]);
   const [cfg, setCfg] = useState<{ publishEnabled: boolean; mode: string }>();
   const [refreshKey, setRefreshKey] = useState(0);
@@ -67,7 +68,7 @@ export function App() {
     void refresh().catch(() => {});
     const timer = setInterval(() => { void refresh().catch(() => {}); }, 3000);
     return () => clearInterval(timer);
-  }, [online, settings, refreshKey]);
+  }, [online, section, refreshKey]);
   useEffect(() => {
     if (!draft) return;
     const id = draft.id;
@@ -91,22 +92,6 @@ export function App() {
     const timer = setTimeout(() => { void save().catch(e => { setError(e.message); setSaveFailed(true); }); }, 500);
     return () => clearTimeout(timer);
   }, [draft, dirty, online, working, saveFailed]);
-  useEffect(() => {
-    if (!settings) return;
-    const prior = document.activeElement as HTMLElement | null;
-    const dialog = document.querySelector<HTMLElement>('[role=dialog]');
-    dialog?.querySelector<HTMLElement>('button')?.focus();
-    const keys = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSettings(false);
-      if (e.key !== 'Tab' || !dialog) return;
-      const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input,select,textarea')).filter(el => el.getClientRects().length);
-      const first = controls[0], last = controls.at(-1);
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
-    };
-    document.addEventListener('keydown', keys);
-    return () => { document.removeEventListener('keydown', keys); prior?.focus(); };
-  }, [settings]);
   function edit(key: keyof Draft, value: unknown) {
     if (!current.current || locked(current.current)) return;
     version.current++; show({ ...current.current, [key]: value }, true, key === 'category'); setSaveFailed(false);
@@ -137,7 +122,7 @@ export function App() {
     Object.values(previews).forEach(url => URL.revokeObjectURL(url)); blobs.current = []; setPreviews({}); show(d); setSaveFailed(false);
   }
   async function open(id?: string) {
-    await perform(async () => { if (!locked(current.current)) await save(); reset(await api<Draft>(id ? '/drafts/' + id : '/drafts', id ? undefined : {}, id ? 'GET' : 'POST')); });
+    await perform(async () => { if (!locked(current.current)) await save(); reset(await api<Draft>(id ? '/drafts/' + id : '/drafts', id ? undefined : {}, id ? 'GET' : 'POST')); setSection('New listing'); });
   }
   async function photos(files: FileList | null) {
     if (!files?.length) return;
@@ -159,12 +144,13 @@ export function App() {
   const disabled = working || locked(draft) || !draft;
   const basics = !!draft?.photos.length && !!draft.description.trim() && Number(draft.price) > 0;
   return <div className="lean-app">
-    <header className="lean-header"><a href="/" className="lean-brand">linko.</a><button className="text-button" onClick={() => setSettings(true)}>Settings</button></header>
+    <header className="lean-header"><span className="lean-brand">linko.</span>{cfg?.mode === 'tailnet' && <button className="text-button" onClick={async () => { await api('/auth/logout', {}, 'POST'); await clearCache(); sessionStorage.removeItem('linko-draft'); window.dispatchEvent(new Event('linko-signed-out')); }}>Sign out of Linko panel</button>}</header>
+    <nav className="lean-nav" aria-label="Main navigation">{(['New listing', 'Drafts', 'My listings', 'Settings'] as const).map(name => <button key={name} aria-current={section === name ? 'page' : undefined} onClick={() => setSection(name)}>{name}</button>)}</nav>
     <main className="lean-main">
-      <div className="lean-heading"><h1>New listing</h1><button className="button ghost" disabled={working || !online} onClick={() => void open()}>New draft</button></div>
+      <div className="lean-heading"><h1>{section}</h1>{section === 'New listing' && <button className="button ghost" disabled={working || !online} onClick={() => void open()}>New draft</button>}</div>
       {!online && <p role="status">Offline mode</p>}
       {error && <div className="lean-error" role="alert">{error}{saveFailed && <button className="text-button" onClick={() => void perform(async () => { reset(await api<Draft>('/drafts/' + draft!.id)); })}>Reload saved draft</button>}</div>}
-      <section className="panel lean-editor" aria-label="Listing editor">
+      {section === 'New listing' && <section className="panel lean-editor" aria-label="Listing editor">
         <fieldset disabled={disabled} className="lean-fields">
           <div className="lean-photos"><label className="photo-upload">Photos · {draft?.photos.length || 0}/8<input ref={input} type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={disabled || !online || (draft?.photos.length || 0) >= 8} onChange={e => void photos(e.target.files)}/></label>
             {!!draft?.photos.length && <div className="lean-photo-grid">{draft.photos.map((p, i) => <div className={'lean-photo ' + (p.id === draft.coverId ? 'cover' : '')} key={p.id}>
@@ -185,11 +171,11 @@ export function App() {
         </fieldset>
         {(running(draft) || ['blocked', 'needs_input', 'unknown'].includes(draft?.state || '')) && <p role="status">{draft?.message}</p>}
         <div className="lean-publish"><span aria-live="polite">{dirty ? online ? 'Saving…' : 'Saved on this device' : 'Saved'}</span><button className="button primary" disabled={disabled || !online || !basics || !draft?.title.trim() || !draft.accountId || !cfg?.publishEnabled} onClick={() => void action('publish')}>Publish</button></div>
-      </section>
-      <section className="panel lean-drafts" aria-label="Drafts"><details><summary>Drafts · {drafts.length}</summary>{!drafts.length && <p>No drafts</p>}{drafts.map(d => <article key={d.id}><div><strong>{d.title || 'Untitled'}</strong><small>{d.state === 'needs_input' ? 'Needs details' : d.state}</small></div><button className="text-button" disabled={!online || working} onClick={() => void open(d.id)}>Resume {d.title || 'Untitled'}</button><button className="text-button" disabled={!online || working} onClick={() => void perform(async () => { const saved = d.id === current.current?.id ? await save() : d; await api(`/drafts/${d.id}?revision=${saved.revision}`, undefined, 'DELETE'); if (current.current?.id === d.id) reset(await api<Draft>('/drafts', {}, 'POST')); })}>Delete {d.title || 'Untitled'}</button></article>)}</details></section>
-      <ListingRecords online={online} disabled={working} refreshKey={refreshKey} onOpenDraft={open}/>
+      </section>}
+      {section === 'Drafts' && <section className="panel lean-drafts" aria-label="Drafts">{!drafts.length && <p>No drafts</p>}{drafts.map(d => <article key={d.id}><div><strong>{d.title || 'Untitled'}</strong><small>{d.state === 'needs_input' ? 'Needs details' : d.state}</small></div><button className="text-button" disabled={!online || working} onClick={() => void open(d.id)}>Resume {d.title || 'Untitled'}</button><button className="text-button" disabled={!online || working} onClick={() => void perform(async () => { const saved = d.id === current.current?.id ? await save() : d; await api(`/drafts/${d.id}?revision=${saved.revision}`, undefined, 'DELETE'); if (current.current?.id === d.id) reset(await api<Draft>('/drafts', {}, 'POST')); })}>Delete {d.title || 'Untitled'}</button></article>)}</section>}
+      {section === 'My listings' && <MyListings online={online}/>}
+      {section === 'Settings' && <Settings online={online} onSaved={() => { setRefreshKey(v => v + 1); }}/>}
     </main>
-    {online && <AgentWindow disabled={working}/>}
-    {settings && <div className="modal-backdrop" onClick={() => setSettings(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="setup-title" onClick={e => e.stopPropagation()}><button className="modal-close" aria-label="Close setup" onClick={() => setSettings(false)}>×</button><h2 id="setup-title">Settings</h2><Settings online={online} onSaved={() => { void refresh().catch(() => {}); }}/>{cfg?.mode === 'tailnet' && <button className="button ghost" onClick={async () => { await api('/auth/logout', {}, 'POST'); await clearCache(); sessionStorage.removeItem('linko-draft'); window.dispatchEvent(new Event('linko-signed-out')); }}>Sign out of Linko panel</button>}</section></div>}
+    {online && <VerificationPrompt/>}
   </div>;
 }

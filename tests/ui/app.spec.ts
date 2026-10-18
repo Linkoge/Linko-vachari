@@ -31,13 +31,15 @@ test('one-page editor autosaves text, photos, cover and order; drafts resume and
   await expect(page.getByRole('status')).toContainText('Codex could not complete', { timeout: 20000 });
   await page.getByRole('button', { name: 'New draft', exact: true }).click();
   await expect(page.getByLabel('Listing title')).toHaveValue('');
-  await page.getByText(/^Drafts ·/).click();
+  await page.getByRole('button', { name: 'Drafts', exact: true }).click();
   await page.getByRole('button', { name: 'Resume Studio lamp', exact: true }).click();
   await expect(page.getByLabel('Description', { exact: true })).toHaveValue('A used lamp with the original stand.');
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.locator('.lean-editor').screenshot({ path: info.outputPath('editor-mobile.png') });
+  await page.getByRole('button', { name: 'Drafts', exact: true }).click();
   await page.getByRole('button', { name: 'Delete Studio lamp', exact: true }).click();
+  await page.getByRole('button', { name: 'New listing', exact: true }).click();
   await expect(page.getByLabel('Listing title')).toHaveValue('');
   expect((await page.request.get('/api/drafts/' + id)).status()).toBe(404); expect(errors).toEqual([]);
 });
@@ -99,7 +101,7 @@ test('Publish queues once and immediately clears the editor, with job status in 
     const nextDraft = await (await page.request.post('/api/drafts', { headers: { 'X-Linko-Request': '1' }, data: {} })).json();
     await route.fulfill({ status: 202, json: { accepted: true, nextDraft, job: { status: 'queued' } } });
   });
-  await page.route('**/api/listings', r => r.fulfill({ json: { records: [], jobs: published ? [{ id: 'job1', draft: oldId, title: 'Queued lamp', status: 'needs_input', state: 'needs_input', message: 'Power source is required.' }] : [] } }));
+  await page.route('**/api/listings', r => r.fulfill({ json: { listings: published ? [{ id: oldId, title: 'Queued lamp', price: '25', currency: 'GEL', account: 'Personal', status: 'failed', canDelete: false }] : [] } }));
   await page.goto('/'); await expect(page.locator('input[type=file]')).toBeEnabled();
   await page.locator('input[type=file]').setInputFiles('public/icons/icon-192.png'); await expect(page.getByAltText('Item photo 1')).toBeVisible();
   await page.getByLabel('Listing title').fill('Queued lamp'); await page.getByLabel('Asking price', { exact: true }).fill('25'); await page.getByLabel('Description', { exact: true }).fill('Used lamp');
@@ -107,11 +109,14 @@ test('Publish queues once and immediately clears the editor, with job status in 
   await expect(page.getByLabel('Listing title')).toHaveValue(''); await expect(page.getByAltText('Item photo 1')).toHaveCount(0);
   await expect(page.getByLabel('Asking price', { exact: true })).toHaveValue(''); await expect(page.getByLabel('Description', { exact: true })).toHaveValue('');
   expect(published).toBe(1); expect(await page.evaluate(() => sessionStorage.getItem('linko-draft'))).not.toBe(oldId);
-  await expect(page.getByLabel('Publish jobs')).toContainText('needs_input');
+  await page.getByRole('button', { name: 'My listings', exact: true }).click();
+  await expect(page.getByRole('article', { name: 'Queued lamp' })).toContainText('failed');
+  await expect(page.getByRole('button', { name: 'Open draft' })).toHaveCount(0);
   await page.route('**/api/drafts/' + oldId, async r => {
     const d = await (await r.fetch()).json(); await r.fulfill({ json: { ...d, state: 'needs_input', questions: [{ key: 'Power', label: 'Power source', options: ['Mains', 'Battery'] }] } });
   });
-  await page.getByLabel('Publish jobs').getByRole('button', { name: 'Open draft' }).click();
+  await page.getByRole('button', { name: 'Drafts', exact: true }).click();
+  await page.getByRole('button', { name: 'Resume Queued lamp', exact: true }).click();
   await expect(page.getByLabel('Power source', { exact: true })).toBeVisible(); await page.getByLabel('Power source', { exact: true }).selectOption('Mains');
   await expect(page.locator('.lean-publish span')).toHaveText('Saved');
   expect((await (await page.request.get('/api/drafts/' + oldId)).json()).facts.Power).toBe('Mains');

@@ -39,6 +39,7 @@ export class Accounts {
     }
   }
   get defaultId() { return this.data.lastUsed; }
+  label(id: string) { return this.data.accounts.find(a => a.id === id)?.label || 'Removed account'; }
   require(id = this.defaultId): Account {
     const a = this.data.accounts.find(a => a.id === id && !a.removed);
     if (!a) throw new WorkflowError('ACCOUNT', 'This MyMarket account was removed. Choose an available account in Settings.');

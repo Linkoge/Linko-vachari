@@ -177,7 +177,7 @@ test('records and pause API keep archive behind the existing private access boun
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/listings`;
   try {
     const response = await fetch(base); assert.equal(response.headers.get('cache-control'), 'no-store');
-    const data = await response.json(); assert.equal(data.records[0].title, f.d.title); assert.equal('recipe' in data.records[0], false);
+    const data = await response.json(); assert.equal(data.listings[0].title, f.d.title); assert.equal('recipe' in data.listings[0], false);
     const md = await fetch(base + '/' + f.d.id + '/record'); assert.equal(md.status, 200); assert.match(md.headers.get('content-disposition')!, /attachment/); assert.ok((await md.text()).includes('Power source'));
     assert.equal((await fetch(base + '/' + f.d.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"enabled":false}' })).status, 403);
     assert.equal((await fetch(base + '/' + f.d.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-Linko-Request': '1' }, body: '{"enabled":false}' })).status, 200);

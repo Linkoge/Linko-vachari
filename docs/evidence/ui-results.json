@@ -2,11 +2,11 @@
   "config": {
     "argv": [
       "/usr/bin/node",
-      "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/node_modules/.pnpm/playwright@1.64.0/node_modules/playwright/cli.js",
+      "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/30e7a0c2262b44a492c9bade1e858d73/node_modules/playwright/cli.js",
       "test"
     ],
-    "configFile": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/playwright.config.ts",
-    "rootDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/tests/ui",
+    "configFile": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/30e7a0c2262b44a492c9bade1e858d73/playwright.config.ts",
+    "rootDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/30e7a0c2262b44a492c9bade1e858d73/tests/ui",
     "failOnFlakyTests": false,
     "forbidOnly": false,
     "fullyParallel": false,
@@ -22,7 +22,7 @@
     "preserveOutput": "always",
     "projects": [
       {
-        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/test-results",
+        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/30e7a0c2262b44a492c9bade1e858d73/test-results",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
@@ -30,7 +30,7 @@
         },
         "id": "",
         "name": "",
-        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/tests/ui",
+        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/30e7a0c2262b44a492c9bade1e858d73/tests/ui",
         "testIgnore": [],
         "testMatch": [
           "**/*.@(spec|test).?(c|m)[jt]s?(x)"
@@ -42,15 +42,15 @@
       {
         "grep": {},
         "grepInvert": null,
-        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/test-results",
+        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/30e7a0c2262b44a492c9bade1e858d73/test-results",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
           "actualWorkers": 1
         },
         "name": "",
-        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/tests/ui",
-        "snapshotDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/tests/ui",
+        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/30e7a0c2262b44a492c9bade1e858d73/tests/ui",
+        "snapshotDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/30e7a0c2262b44a492c9bade1e858d73/tests/ui",
         "testIgnore": [],
         "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
         "timeout": 30000,
@@ -88,7 +88,7 @@
     "workers": 1,
     "webServer": {
       "env": {
-        "LINKO_DATA_DIR": "/tmp/linko-ui-vdQCVX",
+        "LINKO_DATA_DIR": "/tmp/linko-ui-f05kXK",
         "ALLOW_PUBLISH": "false",
         "LINKO_AUTO_RELIST": "false"
       },
@@ -99,13 +99,13 @@
   },
   "suites": [
     {
-      "title": "agent.spec.ts",
-      "file": "agent.spec.ts",
+      "title": "accounts.spec.ts",
+      "file": "accounts.spec.ts",
       "column": 0,
       "line": 0,
       "specs": [
         {
-          "title": "assistant window: saves credentials privately, prompts for the code and sends it back, offers the browser only as a fallback",
+          "title": "Settings saves several accounts privately and draft account choice persists as the next default",
           "ok": true,
           "tags": [],
           "tests": [
@@ -120,12 +120,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2169,
+                  "duration": 2110,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:35.637Z",
+                  "startTime": "2026-10-18T16:55:16.494Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -133,9 +133,43 @@
               "status": "expected"
             }
           ],
-          "id": "00574607846d83245288-e51d9400dd8f84b0a361",
-          "file": "agent.spec.ts",
-          "line": 2,
+          "id": "cbe1475516a9f5b841ab-939e3a791f04366414d9",
+          "file": "accounts.spec.ts",
+          "line": 3,
+          "column": 1
+        },
+        {
+          "title": "uncertain tree results present three paths and preserve the owner choice",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2888,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:18.726Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "cbe1475516a9f5b841ab-4ab422d2da4df5944b75",
+          "file": "accounts.spec.ts",
+          "line": 35,
           "column": 1
         }
       ]
@@ -147,7 +181,7 @@
       "line": 0,
       "specs": [
         {
-          "title": "photo workflow, local facts, editable review and actionable Codex execution failure",
+          "title": "one-page editor autosaves text, photos, cover and order; drafts resume and delete",
           "ok": true,
           "tags": [],
           "tests": [
@@ -162,12 +196,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 3362,
+                  "duration": 4081,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:37.949Z",
+                  "startTime": "2026-10-18T16:55:21.656Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -175,13 +209,13 @@
               "status": "expected"
             }
           ],
-          "id": "c31ff144dc4fee3acd0a-dd5c91114c8582aa8c20",
+          "id": "c31ff144dc4fee3acd0a-faf41ed7aef4d2ffcc7e",
           "file": "app.spec.ts",
-          "line": 2,
+          "line": 3,
           "column": 1
         },
         {
-          "title": "responsive shell, private API exclusion, first-visit offline reload and local text persistence",
+          "title": "offline edits persist per tab and autosave after reconnect; service worker excludes private APIs",
           "ok": true,
           "tags": [],
           "tests": [
@@ -196,12 +230,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2646,
+                  "duration": 3253,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:41.329Z",
+                  "startTime": "2026-10-18T16:55:25.766Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -209,9 +243,77 @@
               "status": "expected"
             }
           ],
-          "id": "c31ff144dc4fee3acd0a-60fe8999d852434448fa",
+          "id": "c31ff144dc4fee3acd0a-9ff8ed26d3c8671c29f1",
           "file": "app.spec.ts",
-          "line": 26,
+          "line": 47,
+          "column": 1
+        },
+        {
+          "title": "tabs create independent drafts and edits typed during autosave are preserved",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1990,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:29.044Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "c31ff144dc4fee3acd0a-03600054b15dac7dc2a0",
+          "file": "app.spec.ts",
+          "line": 67,
+          "column": 1
+        },
+        {
+          "title": "Publish queues once and immediately clears the editor, with job status in listings and missing facts inline",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1548,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:31.061Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "c31ff144dc4fee3acd0a-5a2e290c6852fd24499f",
+          "file": "app.spec.ts",
+          "line": 96,
           "column": 1
         }
       ]
@@ -223,7 +325,7 @@
       "line": 0,
       "specs": [
         {
-          "title": "saved listings expose records, pause/resume and the original draft",
+          "title": "four-section navigation and My listings deletion at 1360px",
           "ok": true,
           "tags": [],
           "tests": [
@@ -238,12 +340,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1177,
+                  "duration": 1698,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:44.001Z",
+                  "startTime": "2026-10-18T16:55:32.648Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -251,9 +353,111 @@
               "status": "expected"
             }
           ],
-          "id": "4edde57808a4ab4fe11a-796d693eaab0dfd7478d",
+          "id": "4edde57808a4ab4fe11a-6710957ddca9ec224a77",
           "file": "listings.spec.ts",
-          "line": 3,
+          "line": 4,
+          "column": 3
+        },
+        {
+          "title": "four-section navigation and My listings deletion at 390px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1471,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:34.386Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4edde57808a4ab4fe11a-1ec8d22bba13c02d51a3",
+          "file": "listings.spec.ts",
+          "line": 4,
+          "column": 3
+        },
+        {
+          "title": "four-section navigation and My listings deletion at 320px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1624,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:35.923Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4edde57808a4ab4fe11a-56de03ef3ef288dde733",
+          "file": "listings.spec.ts",
+          "line": 4,
+          "column": 3
+        },
+        {
+          "title": "My listings is visible before the first publication, and failed deletes keep the row",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2333,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:37.605Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4edde57808a4ab4fe11a-9310efe1a53e02c0e1ad",
+          "file": "listings.spec.ts",
+          "line": 65,
           "column": 1
         }
       ]
@@ -280,12 +484,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2984,
+                  "duration": 2103,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:45.221Z",
+                  "startTime": "2026-10-18T16:55:39.982Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -314,12 +518,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2084,
+                  "duration": 2001,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:48.224Z",
+                  "startTime": "2026-10-18T16:55:42.105Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -348,12 +552,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1980,
+                  "duration": 1949,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:50.326Z",
+                  "startTime": "2026-10-18T16:55:44.125Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -382,12 +586,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 899,
+                  "duration": 640,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:52.324Z",
+                  "startTime": "2026-10-18T16:55:46.094Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -397,7 +601,7 @@
           ],
           "id": "d877ffdf71ec720167ae-71637b01fa1c6d8d9649",
           "file": "settings.spec.ts",
-          "line": 85,
+          "line": 84,
           "column": 1
         },
         {
@@ -416,12 +620,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1956,
+                  "duration": 1976,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:53.246Z",
+                  "startTime": "2026-10-18T16:55:46.751Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -431,19 +635,11 @@
           ],
           "id": "d877ffdf71ec720167ae-5abae6ab9f5c1f5c3854",
           "file": "settings.spec.ts",
-          "line": 122,
+          "line": 121,
           "column": 1
-        }
-      ]
-    },
-    {
-      "title": "setup.spec.ts",
-      "file": "setup.spec.ts",
-      "column": 0,
-      "line": 0,
-      "specs": [
+        },
         {
-          "title": "protected panel sign-in is distinct from marketplace login; private browser controls and sign-out do not retain typed secrets",
+          "title": "publish and auto-relist toggles save through the real API and survive navigation and reload",
           "ok": true,
           "tags": [],
           "tests": [
@@ -458,12 +654,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1295,
+                  "duration": 2036,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T09:03:55.228Z",
+                  "startTime": "2026-10-18T16:55:48.744Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -471,8 +667,126 @@
               "status": "expected"
             }
           ],
-          "id": "cca0b3e1305f7160eea0-a61ac3c22739cea9f237",
+          "id": "d877ffdf71ec720167ae-b35b4c8336da2af7782b",
+          "file": "settings.spec.ts",
+          "line": 150,
+          "column": 1
+        },
+        {
+          "title": "a rejected automation save restores server state and offline toggles stay disabled",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 455,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:50.803Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d877ffdf71ec720167ae-ecca5e81fa6898e81ed8",
+          "file": "settings.spec.ts",
+          "line": 175,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "setup.spec.ts",
+      "file": "setup.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "protected panel sign-in is distinct from marketplace login; automatic account sign-in and panel sign-out stay separate",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 477,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:51.296Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "cca0b3e1305f7160eea0-1a6a630ea40f79010fbc",
           "file": "setup.spec.ts",
+          "line": 3,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "verification.spec.ts",
+      "file": "verification.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "background sign-in has no assistant panel and opens only the required verification prompt",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2279,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T16:55:51.796Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "5dbceb02ef26bd154034-6769f082c49b3e195c88",
+          "file": "verification.spec.ts",
           "line": 3,
           "column": 1
         }
@@ -481,9 +795,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-18T09:03:31.417Z",
-    "duration": 25243.307,
-    "expected": 10,
+    "startTime": "2026-10-18T16:55:11.128Z",
+    "duration": 43043.745,
+    "expected": 19,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0
