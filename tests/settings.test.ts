@@ -40,8 +40,14 @@ if(args.includes('--output-last-message'))writeFileSync(args[args.indexOf('--out
     assert.equal(dispatched[0].provider, 'claude'); assert.ok(dispatched[0].args.includes('haiku')); assert.ok(dispatched[0].args.includes('low'));
     assert.equal(dispatched[0].input.includes(marker), false); assert.ok(dispatched[0].args.includes('--tools')); assert.equal(dispatched[0].args[dispatched[0].args.indexOf('--tools')+1], '');
     assert.equal(dispatched[1].provider, 'codex'); assert.ok(dispatched[1].args.includes('chosen-model')); assert.ok(dispatched[1].args.includes('model_reasoning_effort="high"'));
+    // The manager-style family buttons save an exact model ID, and effort taps
+    // update that same record. The next decision must use the updated pair.
+    data.ai.fixit = { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }; source.save(data);
+    await ask(schema, 'Repair again', '{}', 'fixit', reloaded);
+    const selected = JSON.parse(readFileSync(calls, 'utf8'))[2];
+    assert.equal(selected.provider, 'codex'); assert.ok(selected.args.includes('gpt-6.1-sol')); assert.ok(selected.args.includes('model_reasoning_effort="medium"'));
     config.claudeBinary = join(root, 'not-installed'); await assert.rejects(ask(schema, '', '', 'everyday', source), /Claude Code needs/);
-    assert.equal(JSON.parse(readFileSync(calls, 'utf8')).length, 2);
+    assert.equal(JSON.parse(readFileSync(calls, 'utf8')).length, 3);
     config.claudeBinary = claude;
     writeFileSync(claude, "#!/usr/bin/env node\nconsole.log(JSON.stringify({authMethod:'none'}));process.exit(1)", { mode: 0o700 });
     assert.equal((await providerStatus('claude')).signedIn, false); await assert.rejects(ask(schema,'','','everyday',source), /sign-in/);

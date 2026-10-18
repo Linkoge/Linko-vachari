@@ -1,14 +1,19 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 
-for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }]) {
-  test(`AI slots and Telegram setup persist at ${size.width}px`, async ({ page }, testInfo) => {
+const providers = {
+  codex: { installed: true, signedIn: true, message: 'Signed in with local subscription' },
+  claude: { installed: false, signedIn: false, message: 'CLI not installed, unsupported, or status check timed out' },
+};
+const initialAI = () => ({ everyday: { provider: 'codex', model: 'small-choice', effort: 'low' }, fixit: { provider: 'claude', model: 'opus', effort: 'high' } });
+
+for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }, { width: 320, height: 740 }]) {
+  test(`AI picker and Telegram persist at ${size.width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize(size);
-    const ai = { everyday: { provider: 'codex', model: 'small-choice', effort: 'low' }, fixit: { provider: 'claude', model: 'opus', effort: 'high' } };
-    let saved = { ai, telegram: { configured: false, chatId: '' } }; let sent = 0, detected = 0;
-    const marker = randomUUID();
-    await page.route('**/api/settings', r => r.fulfill({ json: { ...saved, providers: { codex: { installed: true, signedIn: true, message: 'Signed in with local subscription' }, claude: { installed: false, signedIn: false, message: 'CLI not installed, unsupported, or status check timed out' } } } }));
-    await page.route('**/api/settings/ai', r => { saved = { ...saved, ai: r.request().postDataJSON() }; return r.fulfill({ json: saved }); });
+    let saved = { ai: initialAI(), telegram: { configured: false, chatId: '' } }; let sent = 0, detected = 0;
+    const writes: unknown[] = [], marker = randomUUID();
+    await page.route('**/api/settings', r => r.fulfill({ json: { ...saved, providers } }));
+    await page.route('**/api/settings/ai', r => { writes.push(r.request().postDataJSON()); saved = { ...saved, ai: r.request().postDataJSON() }; return r.fulfill({ json: saved }); });
     await page.route('**/api/settings/telegram', r => {
       const data = r.request().postDataJSON(); if (data.token) expect(data.token).toBe(marker);
       saved = { ...saved, telegram: { configured: true, chatId: data.chatId } }; return r.fulfill({ json: saved });
@@ -16,23 +21,129 @@ for (const size of [{ width: 1360, height: 1000 }, { width: 390, height: 844 }])
     await page.route('**/api/settings/telegram/detect', r => { detected++; return r.fulfill({ json: { chatIds: ['123'] } }); });
     await page.route('**/api/settings/telegram/test', r => { sent++; return r.fulfill({ json: { sent: true } }); });
     await page.goto('/');
-    await page.screenshot({path:testInfo.outputPath(`overview-${size.width}.png`),fullPage:true});
+    await page.screenshot({ path: testInfo.outputPath(`overview-${size.width}.png`), fullPage: true });
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    const dialog = page.getByRole('dialog'); await expect(dialog.getByRole('heading', { name: 'AI', exact: true })).toBeVisible();
-    await expect(dialog.locator('fieldset')).toHaveCount(2);
-    await expect(dialog.getByLabel('fixit provider')).toHaveValue('claude'); await expect(dialog.getByText(/CLI not installed/)).toBeVisible();
-    await dialog.getByLabel('everyday model').fill('saved-choice'); await dialog.getByLabel('everyday effort').selectOption('medium');
-    await dialog.getByRole('button', { name: 'Save AI choices' }).click(); await expect(dialog.getByText('AI choices saved.', { exact: false })).toBeVisible();
-    await page.getByRole('button', { name: 'Close setup' }).click(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
-    await expect(page.getByLabel('everyday model')).toHaveValue('saved-choice'); await expect(page.getByLabel('everyday effort')).toHaveValue('medium');
-    await dialog.screenshot({ path: testInfo.outputPath(`ai-${size.width}.png`) });
+    const dialog = page.getByRole('dialog'), picker = dialog.locator('.ai-picker');
+    await expect(dialog.getByRole('heading', { name: 'AI', exact: true })).toBeVisible();
+    // The floating assistant must stay behind the settings backdrop on phones.
+    expect(await page.locator('.modal-backdrop').evaluate(el => {
+      const box = document.querySelector('.agent-toggle')!.getBoundingClientRect();
+      return el.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+    })).toBe(true);
+    await expect(picker.locator('fieldset')).toHaveCount(2);
+    await expect(picker.locator('.model-choice-row[role=group]')).toHaveCount(8);
+    await expect(picker.getByRole('button', { name: 'Everyday Codex small-choice', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(picker.getByRole('button', { name: 'Fix-it Claude Opus', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(picker.getByText(/CLI not installed/)).toBeVisible();
+    await expect(picker.getByRole('button', { name: 'Everyday Claude Low', exact: true })).toBeDisabled();
+    await expect(picker.getByRole('button', { name: 'Fix-it Codex High', exact: true })).toBeDisabled();
+    for (const row of await picker.locator('.model-choice-row[role=group]').all()) {
+      expect(await row.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(3);
+      for (const button of await row.getByRole('button').all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(38);
+    }
+    await picker.getByRole('button', { name: 'Everyday Codex Sol', exact: true }).click();
+    await expect(dialog.getByRole('status').filter({ hasText: 'Settings saved' })).toBeVisible();
+    await expect(picker.getByRole('button', { name: 'Everyday Codex Sol', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await picker.getByRole('button', { name: 'Everyday Codex Medium', exact: true }).click();
+    await expect(picker.getByRole('button', { name: 'Everyday Codex Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(saved.ai).toEqual({ everyday: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'medium' }, fixit: initialAI().fixit });
+    await dialog.evaluate(el => { el.scrollTop = 0; });
+    await dialog.screenshot({ path: testInfo.outputPath(`ai-dialog-${size.width}.png`) });
+    await picker.getByRole('button', { name: 'Everyday Claude Sonnet', exact: true }).click();
+    await expect(picker.getByRole('button', { name: 'Everyday Claude Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(saved.ai.everyday).toEqual({ provider: 'claude', model: 'sonnet', effort: 'medium' });
+    expect(writes).toHaveLength(3);
+    for (const slot of await picker.locator('fieldset').all()) await expect(slot.locator('.model-family[aria-pressed=true]')).toHaveCount(1);
+    // Focus navigation stays within a row and does not silently save a new choice.
+    const first = picker.getByRole('button', { name: 'Everyday Codex Luna', exact: true });
+    await first.focus(); await first.press('ArrowLeft');
+    await expect(picker.getByRole('button', { name: 'Everyday Codex Astra', exact: true })).toBeFocused();
+    await page.keyboard.press('Home'); await expect(first).toBeFocused();
+    await page.keyboard.press('End'); await expect(picker.getByRole('button', { name: 'Everyday Codex Astra', exact: true })).toBeFocused();
+    expect(writes).toHaveLength(3);
+    await picker.screenshot({ path: testInfo.outputPath(`ai-${size.width}.png`) });
+    await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused();
+    await page.reload(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await expect(picker.getByRole('button', { name: 'Everyday Claude Sonnet', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(picker.getByRole('button', { name: 'Everyday Claude Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(picker.getByRole('button', { name: 'Fix-it Claude Opus', exact: true })).toHaveAttribute('aria-pressed', 'true');
     await dialog.getByLabel('Bot token').fill(marker); await dialog.getByRole('button', { name: 'Save Telegram', exact: true }).click();
     await expect(dialog.getByLabel('Bot token')).toHaveValue(''); await expect(dialog.getByText('@BotFather')).toBeAttached();
     await dialog.getByRole('button', { name: 'Detect chat ID', exact: true }).click(); await expect(dialog.getByLabel('Chat ID', { exact: true })).toHaveValue('123');
     await dialog.getByRole('button', { name: 'Save Telegram', exact: true }).click(); await dialog.getByRole('button', { name: 'Send test message', exact: true }).click();
     await expect(dialog.getByText('Test message sent.', { exact: true })).toBeVisible(); expect(sent).toBe(1); expect(detected).toBe(1);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const layout = await page.evaluate(() => ({ width: window.innerWidth, content: document.documentElement.scrollWidth,
+      overflow: [...document.querySelectorAll('body *')].filter(el => el.getBoundingClientRect().right > window.innerWidth).map(el => ({ tag: el.tagName, class: el.className })).slice(0, 10) }));
+    expect(layout.content, JSON.stringify(layout)).toBeLessThanOrEqual(layout.width);
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await dialog.screenshot({ path: testInfo.outputPath(`telegram-${size.width}.png`) });
     expect(await page.evaluate(() => Object.values(localStorage).join(' '))).not.toContain(marker);
   });
 }
+
+test('pending, rejected and lost saves never show an unconfirmed selection or switch provider', async ({ page, context }) => {
+  let ai = initialAI(), available = true;
+  await page.route('**/api/settings', r => available ? r.fulfill({ json: { ai, telegram: { configured: false, chatId: '' }, providers } }) : r.abort());
+  let finish: () => void = () => {};
+  await page.route('**/api/settings/ai', async r => {
+    await new Promise<void>(resolve => { finish = resolve; });
+    await r.fulfill({ status: 409, json: { message: 'Wait for the current job before changing AI settings.' } });
+  });
+  await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const picker = page.locator('.ai-picker'), sol = picker.getByRole('button', { name: 'Everyday Codex Sol', exact: true });
+  await sol.click();
+  await expect(page.getByText('Saving settings', { exact: true })).toBeVisible();
+  await expect(sol).toHaveAttribute('aria-pressed', 'false');
+  await expect(picker.getByRole('button', { name: 'Fix-it Claude Sonnet', exact: true })).toBeDisabled();
+  finish();
+  await expect(page.getByRole('alert')).toContainText('Wait for the current job');
+  await expect(sol).toHaveAttribute('aria-pressed', 'false');
+  await expect(picker.getByRole('button', { name: 'Everyday Codex small-choice', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sol).toBeFocused();
+  // The write commits but its response is lost: GET is authoritative.
+  await page.route('**/api/settings/ai', r => { ai = r.request().postDataJSON(); return r.abort(); });
+  await sol.click();
+  await expect(sol).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Saved choices restored', { exact: true })).toBeVisible();
+  expect(ai.fixit).toEqual(initialAI().fixit);
+  // Neither response nor refresh can be confirmed. Clear cached controls and retry.
+  available = false;
+  await picker.getByRole('button', { name: 'Everyday Codex High', exact: true }).click();
+  await expect(picker.getByRole('button')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Retry settings', exact: true })).toBeVisible();
+  available = true; await page.getByRole('button', { name: 'Retry settings', exact: true }).click();
+  await expect(picker.getByRole('button', { name: 'Everyday Codex High', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await context.setOffline(true);
+  await expect(sol).toBeDisabled();
+  await expect(page.getByText('Offline · saved choices cannot be changed', { exact: true })).toBeVisible();
+});
+
+test('custom models preserve the exact ID, effort and independent slot through real API persistence', async ({ page, request }) => {
+  // The production server uses a disposable data directory. Only provider readiness
+  // is mocked; the UI saves/reloads through the real private settings API.
+  await page.route('**/api/settings', async r => {
+    const response = await r.fetch(); await r.fulfill({ json: { ...await response.json(), providers } });
+  });
+  const initial = await (await request.get('/api/settings')).json();
+  await page.goto('/'); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const slot = page.locator('.ai-slot').filter({ has: page.locator('legend', { hasText: 'Fix-it' }) });
+  await slot.getByText('Use another model', { exact: true }).click();
+  await slot.getByLabel('Fix-it custom provider').selectOption('claude');
+  const model = slot.getByLabel('Fix-it custom model');
+  await model.fill('bad model');
+  expect(await model.evaluate(el => (el as HTMLInputElement).validity.patternMismatch)).toBe(true);
+  await model.fill('account/model.v2');
+  expect(await model.evaluate(el => (el as HTMLInputElement).checkValidity())).toBe(true);
+  await slot.getByLabel('Fix-it custom model').fill('my-exact-model');
+  await expect(slot.locator('.model-family[aria-pressed=true]')).toHaveText(initial.ai.fixit.model);
+  await slot.getByRole('button', { name: 'Save model', exact: true }).click();
+  await expect(slot.getByRole('button', { name: 'Fix-it Claude my-exact-model', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await slot.getByRole('button', { name: 'Fix-it Claude Medium', exact: true }).click();
+  await expect(slot.getByRole('button', { name: 'Fix-it Claude Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  const saved = await (await request.get('/api/settings')).json();
+  expect(saved.ai).toEqual({ everyday: initial.ai.everyday, fixit: { provider: 'claude', model: 'my-exact-model', effort: 'medium' } });
+  await page.reload(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(slot.getByRole('button', { name: 'Fix-it Claude my-exact-model', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(slot.getByRole('button', { name: 'Fix-it Claude Medium', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});

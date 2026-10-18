@@ -13,3 +13,36 @@
  .listing-records p { margin: 10px 0; overflow-wrap: anywhere; }
 
 .connection-settings{border-top:1px solid #e3e8dc;margin-top:20px;padding-top:12px}.connection-settings fieldset{border:1px solid #dbe3d0;border-radius:10px;margin:16px 0;padding:14px;min-width:0}.connection-settings legend{font-weight:650;color:#516a42}.connection-settings h3{margin-top:25px}.connection-settings p[role=status],.connection-settings p[role=alert]{overflow-wrap:anywhere;color:#536943}.settings-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:15px}.connection-settings label{margin:12px 0}.settings-entry{margin-right:auto;padding:8px}.listing-records button{min-height:36px}.connection-settings input,.connection-settings select{font-size:16px}.connection-settings .button{white-space:normal}.connection-settings ol{padding-left:20px}.modal:has(.connection-settings){width:620px}
+
+/* Port of the manager's model-settings.js / model-choice-row styles: the
+   three-column provider rows and quieter effort controls use this app's palette. */
+.modal-backdrop:has(.connection-settings){z-index:40}
+.modal:has(.connection-settings){width:420px;padding:20px 14px;max-height:calc(100dvh - 32px)}
+.modal:has(.connection-settings)>.modal-symbol{display:none}
+.modal:has(.connection-settings)>h2{font-size:20px;margin:0 32px 8px 0;letter-spacing:-.5px}
+.modal:has(.connection-settings)>p:first-of-type{display:none}
+.connection-settings{margin-top:12px;padding-top:10px}
+.ai-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:30px}
+.connection-settings .ai-heading h3{margin:0;font-size:14px}
+.ai-heading [role=status]{font-size:11px;color:#536943;text-align:right}
+.connection-settings .ai-help{font-size:11px;line-height:1.5;margin:6px 0 12px;color:#637459}
+.connection-settings .ai-slot{border:0;border-bottom:1px solid var(--border);border-radius:0;margin:0 0 12px;padding:0 0 10px}
+.connection-settings .ai-slot legend{font-size:13px;font-weight:650;padding:0}
+.connection-settings .ai-slot-description{font-size:11px;line-height:1.5;margin:4px 0 8px;color:#637459}
+.model-choice-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:5px 0}
+.model-choice-row button{min-width:0;min-height:38px;padding:6px 3px;border:1px solid var(--border);border-radius:9px;background:#f1f3ed;color:#5c6d53;font-size:13px;overflow-wrap:anywhere;line-height:1.4}
+.model-choice-row button.model-family{background:linear-gradient(145deg,#f4eddd,#f6f4eb 70%);color:#675d45}
+.model-choice-row button.model-family:hover:not(:disabled){background:linear-gradient(145deg,#eee3c9,#edf1e5 75%)}
+.model-choice-row button.model-family[aria-pressed=true]{background:linear-gradient(145deg,#e7deb6,#e5edd9 75%);border-color:#83996a;color:#354a2f;font-weight:700;box-shadow:inset 0 0 0 1px #83996a}
+.model-choice-row button.effort-choice,.model-choice-row button.effort-choice[aria-pressed=true],.model-choice-row button.effort-choice:hover{background:#f1f3ed;border-color:var(--border);box-shadow:none;font-weight:400}
+.model-choice-row button.effort-choice[aria-pressed=true]{color:#355c22}
+.model-choice-row button:disabled{opacity:.45;cursor:default}
+.model-choice-row button:focus-visible,.ai-custom summary:focus-visible{outline:2px solid #627f49;outline-offset:2px}
+.connection-settings .ai-saved-choice{font-size:11px;line-height:1.5;margin:7px 0 2px;overflow-wrap:anywhere;color:#4c6041}
+.connection-settings .ai-provider-status{font-size:10px;line-height:1.5;margin:0;color:#637459}
+.ai-custom{margin-top:6px;font-size:11px;color:#637459}
+.ai-custom summary{cursor:pointer;width:fit-content;min-height:24px;line-height:24px}
+.ai-custom form{padding:6px 0}
+.ai-custom small{display:block;line-height:1.5;margin-bottom:10px}
+.connection-settings p[role=alert]{color:#86513b;background:#fff5eb;border:1px solid #eadbc9;border-radius:8px;padding:10px}
+@media(max-width:380px){.modal-backdrop:has(.connection-settings){padding:8px}.modal:has(.connection-settings){padding:16px 10px;max-height:calc(100dvh - 16px)}.model-choice-row{gap:4px}.model-choice-row button{font-size:12px}.steps button{font-size:9px;gap:4px}.step-line{margin:0 4px}}

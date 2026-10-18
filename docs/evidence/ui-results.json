@@ -2,11 +2,11 @@
   "config": {
     "argv": [
       "/usr/bin/node",
-      "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/node_modules/playwright/cli.js",
+      "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/node_modules/.pnpm/playwright@1.64.0/node_modules/playwright/cli.js",
       "test"
     ],
-    "configFile": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/playwright.config.ts",
-    "rootDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/tests/ui",
+    "configFile": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/playwright.config.ts",
+    "rootDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/tests/ui",
     "failOnFlakyTests": false,
     "forbidOnly": false,
     "fullyParallel": false,
@@ -22,7 +22,7 @@
     "preserveOutput": "always",
     "projects": [
       {
-        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/test-results",
+        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/test-results",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
@@ -30,7 +30,7 @@
         },
         "id": "",
         "name": "",
-        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/tests/ui",
+        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/tests/ui",
         "testIgnore": [],
         "testMatch": [
           "**/*.@(spec|test).?(c|m)[jt]s?(x)"
@@ -42,15 +42,15 @@
       {
         "grep": {},
         "grepInvert": null,
-        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/test-results",
+        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/test-results",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
           "actualWorkers": 1
         },
         "name": "",
-        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/tests/ui",
-        "snapshotDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/tests/ui",
+        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/tests/ui",
+        "snapshotDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/f9d974e7e378423f872ddd7a92c9b7eb/tests/ui",
         "testIgnore": [],
         "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
         "timeout": 30000,
@@ -88,7 +88,7 @@
     "workers": 1,
     "webServer": {
       "env": {
-        "LINKO_DATA_DIR": "/tmp/linko-ui-suite-KkcVeK",
+        "LINKO_DATA_DIR": "/tmp/linko-ui-vdQCVX",
         "ALLOW_PUBLISH": "false",
         "LINKO_AUTO_RELIST": "false"
       },
@@ -120,12 +120,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2294,
+                  "duration": 2169,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T08:27:00.757Z",
+                  "startTime": "2026-10-18T09:03:35.637Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -162,12 +162,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4893,
+                  "duration": 3362,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T08:27:03.214Z",
+                  "startTime": "2026-10-18T09:03:37.949Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -196,12 +196,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2903,
+                  "duration": 2646,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T08:27:08.141Z",
+                  "startTime": "2026-10-18T09:03:41.329Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -238,12 +238,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1262,
+                  "duration": 1177,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T08:27:11.098Z",
+                  "startTime": "2026-10-18T09:03:44.001Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -265,7 +265,7 @@
       "line": 0,
       "specs": [
         {
-          "title": "AI slots and Telegram setup persist at 1360px",
+          "title": "AI picker and Telegram persist at 1360px",
           "ok": true,
           "tags": [],
           "tests": [
@@ -280,12 +280,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2581,
+                  "duration": 2984,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T08:27:12.392Z",
+                  "startTime": "2026-10-18T09:03:45.221Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -293,13 +293,13 @@
               "status": "expected"
             }
           ],
-          "id": "d877ffdf71ec720167ae-d32a5879b6d525444bae",
+          "id": "d877ffdf71ec720167ae-b4a5377e9d4c66799915",
           "file": "settings.spec.ts",
-          "line": 5,
+          "line": 11,
           "column": 3
         },
         {
-          "title": "AI slots and Telegram setup persist at 390px",
+          "title": "AI picker and Telegram persist at 390px",
           "ok": true,
           "tags": [],
           "tests": [
@@ -314,12 +314,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1629,
+                  "duration": 2084,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T08:27:14.996Z",
+                  "startTime": "2026-10-18T09:03:48.224Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -327,10 +327,112 @@
               "status": "expected"
             }
           ],
-          "id": "d877ffdf71ec720167ae-dacf1267406274bd631c",
+          "id": "d877ffdf71ec720167ae-06fe79c983b63b1ea268",
           "file": "settings.spec.ts",
-          "line": 5,
+          "line": 11,
           "column": 3
+        },
+        {
+          "title": "AI picker and Telegram persist at 320px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1980,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T09:03:50.326Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d877ffdf71ec720167ae-ecd71579c7f791c06ca3",
+          "file": "settings.spec.ts",
+          "line": 11,
+          "column": 3
+        },
+        {
+          "title": "pending, rejected and lost saves never show an unconfirmed selection or switch provider",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 899,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T09:03:52.324Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d877ffdf71ec720167ae-71637b01fa1c6d8d9649",
+          "file": "settings.spec.ts",
+          "line": 85,
+          "column": 1
+        },
+        {
+          "title": "custom models preserve the exact ID, effort and independent slot through real API persistence",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1956,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T09:03:53.246Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d877ffdf71ec720167ae-5abae6ab9f5c1f5c3854",
+          "file": "settings.spec.ts",
+          "line": 122,
+          "column": 1
         }
       ]
     },
@@ -356,12 +458,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1713,
+                  "duration": 1295,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-18T08:27:16.647Z",
+                  "startTime": "2026-10-18T09:03:55.228Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -379,9 +481,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-18T08:26:55.167Z",
-    "duration": 23362.989,
-    "expected": 7,
+    "startTime": "2026-10-18T09:03:31.417Z",
+    "duration": 25243.307,
+    "expected": 10,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0
