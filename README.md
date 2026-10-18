@@ -66,6 +66,8 @@ Unknown new form requirements, uncertain Fix-it decisions, sign-in issues, missi
 
 ## Settings: AI and Telegram
 
+**Saved listings** stays visible even before the first verified publication, with an empty history message when there are no records.
+
 Open **Settings** in the top bar on desktop or mobile (or **Connection & setup**). The **AI** section has exactly two slots:
 
 - **Everyday**: category choice and field matching for new listings. Default: Codex CLI, `gpt-5.4-mini`, low reasoning.

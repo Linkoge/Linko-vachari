@@ -34,9 +34,10 @@ export function ListingRecords({ online, onOpenDraft, disabled }: { online: bool
       setDeleting(undefined); await refresh();
     } catch (e) { setError((e as Error).message); } finally { setPending(false); }
   }
-  if (!data?.records.length) return null;
+  if (!data) return null;
   return <section className="panel listing-records" aria-label="Saved listings">
     <details><summary>Saved listings · {data.records.length}</summary>
+      {!data.records.length && <p>No saved listings yet. Verified published listings and their history will appear here.</p>}
       <p>Checks run every three hours while the server is running. Automatic re-listing is {data.autoRelistEnabled ? 'enabled' : 'disabled in server configuration'}. Pause monitoring before selling an item. Delete listings only through this app so they are permanently excluded from re-listing.</p>
       {error && <p role="alert">{error}</p>}
       {data.records.map(r => <article key={r.id}>
