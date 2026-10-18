@@ -1,14 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { createServer } from 'node:http';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 
 const repoRoot = resolve('.');
-const run = promisify(execFile);
 const unitSource = readFileSync('deploy/linko-mymarketer.service', 'utf8');
 const legacy = 'mymarketer-main-aaaaaaaaaaaa-20261018';
 
@@ -23,7 +20,16 @@ function sandbox() {
   // The legacy service is pinned to a release directory rather than the current symlink.
   writeFileSync(p('units/linko-mymarketer.service'), unitSource.replace('releases/current/app', 'releases/' + legacy + '/app'));
   // Fake service manager and package manager: they only log their arguments.
-  writeFileSync(p('bin/systemctl'), '#!/usr/bin/env bash\necho "$@" >> "$FAKE_LOG"\n', { mode: 0o755 });
+  writeFileSync(p('bin/systemctl'), '#!/usr/bin/env bash\necho "$@" >> "$FAKE_LOG"\nif [ "$1 $2" = "--user is-active" ]; then exit "${FAKE_SERVICE_STATUS:-0}"; fi\n', { mode: 0o755 });
+  writeFileSync(p('bin/curl'), `#!/usr/bin/env bash
+printf 'curl\\n' >> "$FAKE_LOG"
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --output ]; then printf '%s' "$FAKE_HTTP_BODY" > "$2"; shift; fi
+  shift
+done
+printf '%s' "$FAKE_HTTP_STATUS"
+exit "\${FAKE_CURL_STATUS:-0}"
+`, { mode: 0o755 });
   writeFileSync(p('bin/fakepm'), '#!/usr/bin/env bash\necho "pm $@" >> "$FAKE_LOG"\n[ "${FAKE_PM_FAIL:-}" = "$1" ] && exit 3\nif [ "$1" = install ]; then mkdir node_modules; fi\nif [ "$1" = build ]; then mkdir dist; echo built > dist/index.html; fi\nexit 0\n', { mode: 0o755 });
   const repo = p('repo');
   mkdirSync(join(repo, 'deploy'), { recursive: true });
@@ -35,7 +41,9 @@ function sandbox() {
     PATH: `${p('bin')}:${process.env.PATH}`, HOME: p('home'), FAKE_LOG: p('fake.log'),
     LINKO_DEPLOY_ROOT: p('root'), DEPLOY_UNIT_DIR: p('units'), DEPLOY_ENV_FILE: p('config/runtime.env'),
     DEPLOY_BACKUP_DIR: p('backup'), DEPLOY_REPO: repo, DEPLOY_COMMIT: git('rev-parse', 'HEAD'),
-    DEPLOY_PACKAGE_MANAGER: p('bin/fakepm'), ...extra,
+    DEPLOY_PACKAGE_MANAGER: p('bin/fakepm'),
+    DEPLOY_HEALTH_WINDOW_SECONDS: '0', FAKE_HTTP_STATUS: '200',
+    FAKE_HTTP_BODY: JSON.stringify({ application: 'linko-mymarketer', releaseId: legacy }), ...extra,
   });
   const script = (name: string, extra: Record<string, string> = {}) => spawnSync(join(repoRoot, 'deploy', name), [], { env: env(extra), encoding: 'utf8', timeout: 60_000 });
   const log = () => (existsSync(p('fake.log')) ? readFileSync(p('fake.log'), 'utf8') : '');
@@ -89,6 +97,7 @@ sandboxed('deploy rejects unknown commits and missing settings without touching 
   assert.notEqual(s.script('deploy', { DEPLOY_COMMIT: 'deadbeefdeadbeef' }).status, 0);
   assert.notEqual(s.script('deploy', { DEPLOY_COMMIT: '--output=x' }).status, 0);
   assert.notEqual(s.script('deploy', { DEPLOY_REPO: '' }).status, 0);
+  assert.notEqual(s.script('deploy', { DEPLOY_ENV_FILE: s.p('missing.env') }).status, 0);
   assert.equal(s.log(), '');
   assert.deepEqual(s.releases(), []);
 });
@@ -122,6 +131,7 @@ sandboxed('backup, deploy and rollback restore the previous release and optional
   assert.equal(s.current(), legacy);
   assert.equal(readFileSync(s.p('root/private/workspace.sqlite'), 'utf8'), 'journal-v2', 'data is kept by default');
   assert.match(s.log(), /--user daemon-reload\n--user restart linko-mymarketer\.service\n$/);
+  assert.match(readFileSync(s.p('units/linko-mymarketer.service'), 'utf8'), new RegExp(legacy), 'restores the saved unit');
 
   assert.equal(s.script('rollback', { DEPLOY_RESTORE_DATA: '1' }).status, 0);
   assert.equal(readFileSync(s.p('root/private/workspace.sqlite'), 'utf8'), 'journal-v1');
@@ -131,6 +141,7 @@ sandboxed('backup, deploy and rollback restore the previous release and optional
 sandboxed('rollback needs a usable record and a present release', s => {
   assert.match(s.script('rollback').stderr, /no backup record/);
   writeFileSync(s.p('backup/record.env'), 'previous_release=\n');
+  writeFileSync(s.p('backup/unit.service'), unitSource);
   assert.match(s.script('rollback').stderr, /no previous release/);
   writeFileSync(s.p('backup/record.env'), 'previous_release=../escape\n');
   assert.match(s.script('rollback').stderr, /invalid release id/);
@@ -148,16 +159,69 @@ sandboxed('deploy prunes only its own old releases and keeps the new and previou
   assert.ok(existsSync(s.p('root/releases/' + legacy + '/app')), 'hand-prepared releases are never pruned');
 });
 
-test('health succeeds on an answering service and fails on server errors or silence', async () => {
-  let status = 200;
-  const server = createServer((_req, res) => { res.statusCode = status; res.end('{}'); });
-  await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
-  const port = (server.address() as { port: number }).port;
-  const env = { ...process.env, DEPLOY_HEALTH_URL: `http://127.0.0.1:${port}/`, DEPLOY_HEALTH_WINDOW_SECONDS: '2', DEPLOY_HEALTH_INTERVAL_SECONDS: '1', DEPLOY_HEALTH_REQUEST_SECONDS: '2' };
-  try {
-    assert.match((await run('deploy/health', [], { env, timeout: 30_000 })).stdout, /healthy/);
-    status = 503;
-    await assert.rejects(run('deploy/health', [], { env, timeout: 30_000 }), /unhealthy/);
-  } finally { server.close(); }
-  await assert.rejects(run('deploy/health', [], { env, timeout: 30_000 }), /unhealthy/);
+sandboxed('health accepts the matching release or known access boundary with an active service', s => {
+  assert.match(s.script('health').stdout, /healthy/);
+  for (const [status, message] of [
+    ['401', 'Sign in to the Linko panel first. This is separate from MyMarket login.'],
+    ['403', 'This panel requires an authorized Tailscale identity through the HTTPS proxy.'],
+  ]) {
+    const result = s.script('health', { FAKE_HTTP_STATUS: status, FAKE_HTTP_BODY: JSON.stringify({ message }) });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  assert.match(s.log(), /curl/);
+  assert.match(s.log(), /--user is-active --quiet linko-mymarketer.service/);
+});
+
+sandboxed('health rejects errors, redirects, stale releases, malformed bodies and inactive services', s => {
+  for (const status of ['000', '301', '404', '500', '503']) {
+    assert.notEqual(s.script('health', { FAKE_HTTP_STATUS: status }).status, 0, status);
+  }
+  for (const body of ['{}', 'not-json', JSON.stringify({ application: 'linko-mymarketer', releaseId: 'stale' })]) {
+    assert.notEqual(s.script('health', { FAKE_HTTP_BODY: body }).status, 0, body);
+  }
+  assert.notEqual(s.script('health', { FAKE_SERVICE_STATUS: '1' }).status, 0);
+  assert.notEqual(s.script('health', { FAKE_CURL_STATUS: '7' }).status, 0);
+  assert.notEqual(s.script('health', { DEPLOY_HEALTH_URL: 'file:///etc/hosts' }).status, 0);
+});
+
+sandboxed('first installation rollback stops the service and removes its unit and current link', s => {
+  rmSync(s.p('units/linko-mymarketer.service'));
+  assert.equal(s.script('backup').status, 0);
+  assert.equal(s.script('deploy').status, 0);
+  const result = s.script('rollback');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(s.current(), '');
+  assert.ok(!existsSync(s.p('units/linko-mymarketer.service')));
+  assert.match(s.log(), /--user stop linko-mymarketer.service/);
+});
+
+sandboxed('rollback after a first-install build failure leaves the service manager alone', s => {
+  rmSync(s.p('units/linko-mymarketer.service'));
+  assert.equal(s.script('backup').status, 0);
+  assert.notEqual(s.script('deploy', { FAKE_PM_FAIL: 'build' }).status, 0);
+  assert.equal(s.script('rollback').status, 0);
+  assert.doesNotMatch(s.log(), /--user/);
+});
+
+sandboxed('the saved setup runs every command with defaults for repo, commit and backup directory', s => {
+  const setup = JSON.parse(readFileSync('.linko-deploy.json', 'utf8'));
+  assert.deepEqual(Object.keys(setup).sort(), ['backup_command', 'deploy_command', 'health_command', 'rollback_command']);
+  // Copy the commands into the disposable repository so their default repo is isolated.
+  for (const file of ['common.sh', 'backup', 'deploy', 'health', 'rollback']) {
+    writeFileSync(join(s.repo, 'deploy', file), readFileSync(join(repoRoot, 'deploy', file)), { mode: 0o755 });
+  }
+  s.git('add', '.'); s.git('commit', '--quiet', '-m', 'scripts');
+  const env = s.env();
+  delete (env as Record<string, string>).DEPLOY_REPO;
+  delete (env as Record<string, string>).DEPLOY_COMMIT;
+  delete (env as Record<string, string>).DEPLOY_BACKUP_DIR;
+  for (const key of ['backup_command', 'deploy_command', 'health_command', 'rollback_command']) {
+    const argv = setup[key];
+    assert.ok(Array.isArray(argv) && argv.every((v: unknown) => typeof v === 'string'));
+    if (key === 'health_command') env.FAKE_HTTP_BODY = JSON.stringify({ application: 'linko-mymarketer', releaseId: s.current() });
+    const result = spawnSync(argv[0], argv.slice(1), { cwd: s.repo, env, encoding: 'utf8', timeout: 60_000 });
+    assert.equal(result.status, 0, key + ': ' + result.stderr);
+  }
+  assert.ok(existsSync(s.p('root/backups/pre-deploy/record.env')));
+  assert.equal(s.current(), legacy);
 });

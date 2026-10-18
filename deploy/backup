@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Record the active release and copy the private data directory into DEPLOY_BACKUP_DIR.
-# Environment: DEPLOY_BACKUP_DIR (required); optional DEPLOY_DATA_DIR, LINKO_DEPLOY_ROOT, DEPLOY_ENV_FILE.
+# Environment: DEPLOY_BACKUP_DIR (defaults to the deploy root backup directory); optional DEPLOY_DATA_DIR, LINKO_DEPLOY_ROOT, DEPLOY_ENV_FILE.
 set -euo pipefail
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 
@@ -20,7 +20,11 @@ else
 fi
 rm -rf "$DEPLOY_BACKUP_DIR/data"
 mv "$DEPLOY_BACKUP_DIR/data.partial" "$DEPLOY_BACKUP_DIR/data"
-if [ -r "$UNIT_PATH" ]; then cp -p "$UNIT_PATH" "$DEPLOY_BACKUP_DIR/unit.service"; fi
+if [ -r "$UNIT_PATH" ]; then
+  cp -p "$UNIT_PATH" "$DEPLOY_BACKUP_DIR/unit.service"
+else
+  rm -f "$DEPLOY_BACKUP_DIR/unit.service"
+fi
 
 record="$DEPLOY_BACKUP_DIR/record.env.partial"
 {

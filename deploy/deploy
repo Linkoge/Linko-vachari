@@ -2,10 +2,13 @@
 # Build DEPLOY_COMMIT of DEPLOY_REPO into releases/<timestamp>-<commit>/app, install the unit, switch
 # releases/current atomically and restart the user service. Health checking is deploy/health's job.
 # Optional: DEPLOY_PACKAGE_MANAGER (default "corepack pnpm"), DEPLOY_KEEP_RELEASES (default 5),
-# DEPLOY_STEP_TIMEOUT_SECONDS (default 900).
+# DEPLOY_STEP_TIMEOUT_SECONDS (default 600).
 set -euo pipefail
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 
+DEPLOY_REPO="${DEPLOY_REPO-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+DEPLOY_COMMIT="${DEPLOY_COMMIT-HEAD}"
+[ -r "$ENV_FILE" ] || die "private runtime environment file is missing"
 [ -n "${DEPLOY_REPO:-}" ] || die "DEPLOY_REPO is required"
 [ -n "${DEPLOY_COMMIT:-}" ] || die "DEPLOY_COMMIT is required"
 case "$DEPLOY_COMMIT" in -*) die "invalid DEPLOY_COMMIT" ;; esac
@@ -16,7 +19,7 @@ exec 9>"$RELEASES_DIR/.deploy.lock"
 flock -n 9 || die "another deploy is running"
 
 read -ra pm <<< "${DEPLOY_PACKAGE_MANAGER:-corepack pnpm}"
-step_timeout="${DEPLOY_STEP_TIMEOUT_SECONDS:-900}"
+step_timeout="${DEPLOY_STEP_TIMEOUT_SECONDS:-600}"
 id="$(date -u +%Y%m%d%H%M%S)-${sha:0:12}"
 release="$RELEASES_DIR/$id"
 [ ! -e "$release" ] || die "release $id already exists"

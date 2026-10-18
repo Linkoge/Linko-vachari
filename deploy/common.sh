@@ -14,7 +14,9 @@ UNIT_PATH="$UNIT_DIR/$SERVICE_NAME"
 ENV_FILE="${DEPLOY_ENV_FILE:-$HOME/.config/linko-mymarketer/runtime.env}"
 RELEASE_ID_PATTERN='^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'
 
-systemctl_user() { systemctl --user "$@"; }
+# A stable default connects separate backup and rollback invocations in the serialized queue.
+DEPLOY_BACKUP_DIR="${DEPLOY_BACKUP_DIR-$DEPLOY_ROOT/backups/pre-deploy}"
+systemctl_user() { timeout "${DEPLOY_SYSTEMCTL_TIMEOUT_SECONDS:-60}" systemctl --user "$@"; }
 
 # The private data directory: explicit override, else LINKO_DATA_DIR from the runtime environment file, else the default.
 data_dir() {

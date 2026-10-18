@@ -1,0 +1,14 @@
+{
+  "deploy_command": [
+    "deploy/deploy"
+  ],
+  "backup_command": [
+    "deploy/backup"
+  ],
+  "health_command": [
+    "deploy/health"
+  ],
+  "rollback_command": [
+    "deploy/rollback"
+  ]
+}

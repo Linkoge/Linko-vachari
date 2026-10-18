@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Point releases/current back at the release recorded by deploy/backup and restart the service.
-# Environment: DEPLOY_BACKUP_DIR (required). Set DEPLOY_RESTORE_DATA=1 to also restore the backed-up data directory
+# Environment: DEPLOY_BACKUP_DIR (same default as backup). Set DEPLOY_RESTORE_DATA=1 to also restore the backed-up data directory
 # (off by default: it would discard anything written since the backup).
 set -euo pipefail
 . "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
@@ -9,7 +9,20 @@ set -euo pipefail
 record="$DEPLOY_BACKUP_DIR/record.env"
 [ -r "$record" ] || die "no backup record in DEPLOY_BACKUP_DIR"
 previous="$(record_value "$record" previous_release)"
-[ -n "$previous" ] || die "backup record has no previous release to restore"
+if [ -z "$previous" ]; then
+  # A first installation has no running release to return to.
+  [ ! -e "$DEPLOY_BACKUP_DIR/unit.service" ] || die "backup record has no previous release to restore"
+  if [ ! -e "$UNIT_PATH" ] && [ ! -L "$CURRENT_LINK" ]; then
+    log "first installation never activated; no rollback needed"
+    exit 0
+  fi
+  systemctl_user stop "$SERVICE_NAME"
+  [ ! -L "$CURRENT_LINK" ] || rm "$CURRENT_LINK"
+  rm -f "$UNIT_PATH"
+  systemctl_user daemon-reload
+  log "rolled back first installation"
+  exit 0
+fi
 [[ "$previous" =~ $RELEASE_ID_PATTERN ]] || die "backup record has an invalid release id"
 [ -d "$RELEASES_DIR/$previous/app" ] || die "previous release $previous is no longer present"
 
@@ -23,6 +36,11 @@ if [ "${DEPLOY_RESTORE_DATA:-0}" = "1" ]; then
   mv -T "$target.rollback-partial" "$target"
 fi
 
+if [ -r "$DEPLOY_BACKUP_DIR/unit.service" ]; then
+  unit_tmp="$UNIT_DIR/.$SERVICE_NAME.rollback.$$"
+  cp -p "$DEPLOY_BACKUP_DIR/unit.service" "$unit_tmp"
+  mv -T "$unit_tmp" "$UNIT_PATH"
+fi
 switch_current "$previous"
 systemctl_user daemon-reload
 systemctl_user restart "$SERVICE_NAME"

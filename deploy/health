@@ -1,24 +1,42 @@
 #!/usr/bin/env bash
-# Succeed once the service answers HTTP (any status below 500) within the retry window.
-# Optional: DEPLOY_HEALTH_URL (default http://127.0.0.1:4310/api/health), DEPLOY_HEALTH_WINDOW_SECONDS (60),
-# DEPLOY_HEALTH_INTERVAL_SECONDS (2), DEPLOY_HEALTH_REQUEST_SECONDS (10).
-set -uo pipefail
+# Check the user service and its HTTP response without credentials or authentication changes.
+# Tailnet panels reject direct loopback requests; only the application's exact access denials count.
+set -euo pipefail
+. "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/common.sh"
 
 url="${DEPLOY_HEALTH_URL:-http://127.0.0.1:4310/api/health}"
 window="${DEPLOY_HEALTH_WINDOW_SECONDS:-60}"
 interval="${DEPLOY_HEALTH_INTERVAL_SECONDS:-2}"
 request="${DEPLOY_HEALTH_REQUEST_SECONDS:-10}"
-
+# Never print URLs or response bodies, which may have private runtime values.
+node -e 'const u = new URL(process.argv[1]); if (!["http:", "https:"].includes(u.protocol) || u.username || u.password) process.exit(1)' "$url" 2>/dev/null || die "invalid health URL"
+for number in "$window" "$interval" "$request"; do
+  [[ "$number" =~ ^[0-9]+$ ]] || die "invalid health timeout"
+done
+[ "$request" -gt 0 ] && [ "$interval" -gt 0 ] || die "health request and interval must be positive"
+body="$(mktemp)"
+trap 'rm -f "$body"' EXIT
+expected="$(active_release)"
 deadline=$((SECONDS + window))
 status=000
 while :; do
-  status="$(curl --silent --output /dev/null --max-time "$request" --write-out '%{http_code}' "$url" 2>/dev/null)" || status=000
-  if [[ "$status" =~ ^[1-4][0-9][0-9]$ ]]; then
-    echo "healthy: $url answered HTTP $status"
+  status="$(curl --silent --noproxy '*' --proto '=http,https' --output "$body" --max-time "$request" --write-out '%{http_code}' -- "$url" 2>/dev/null)" || status=000
+  if systemctl_user is-active --quiet "$SERVICE_NAME" && node -e '
+    const fs = require("node:fs");
+    try {
+      const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const [status, expected] = process.argv.slice(2);
+      const valid = status === "200" ? data.application === "linko-mymarketer" && !!expected && data.releaseId === expected
+        : status === "401" ? data.message === "Sign in to the Linko panel first. This is separate from MyMarket login."
+        : status === "403" && data.message === "This panel requires an authorized Tailscale identity through the HTTPS proxy.";
+      process.exit(valid ? 0 : 1);
+    } catch { process.exit(1); }
+  ' "$body" "$status" "$expected"; then
+    echo "healthy: user service active, application answered HTTP $status"
     exit 0
   fi
   [ "$SECONDS" -lt "$deadline" ] || break
   sleep "$interval"
 done
-echo "unhealthy: $url did not answer (last status $status) within ${window}s" >&2
+echo "unhealthy: service or application check failed (last status $status)" >&2
 exit 1
