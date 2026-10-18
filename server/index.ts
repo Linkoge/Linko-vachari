@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { config } from './config';
 import { createApp } from './app';
 const { app, store, workflow, manual, monitor } = createApp(); store.recover(); workflow.archive.recover();
+for (const r of workflow.archive.all()) if (r.status === 'attention') workflow.telegram.notify(`Attention: ${r.recipe.title}. ${r.message}`);
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(resolve('dist'), { index: false }));
   app.get('/{*path}', (_req, res) => res.sendFile('index.html', { root: resolve('dist') }));

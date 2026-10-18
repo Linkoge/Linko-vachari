@@ -11,7 +11,8 @@ import { savePhoto } from './photos';
 import { WorkflowError } from './types';
 import { AccessBoundary } from './access';
 import { ManualBrowser } from './manual-browser';
-import { codexStatus } from './codex';
+import { providerStatus } from './codex';
+import { aiSchema } from './settings';
 import { ListingMonitor } from './listings';
 const patchSchema = z.object({ revision: z.number().int(), title: z.string().max(120), description: z.string().max(6000), price: z.string().regex(/^(?:\d{0,8})(?:\.\d{0,2})?$/), currency: z.enum(['GEL', 'USD']), model: z.string().max(200), condition: z.string().max(100), location: z.string().max(200), category: z.array(z.string().max(120)).max(8), facts: z.record(z.string().max(100), z.string().max(500)), coverId: z.string().max(50) });
 export function createApp(store = new Store(), workflow = new Workflow(store), access = new AccessBoundary()) {
@@ -25,7 +26,26 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   app.get('/api/health', (_req, res) => res.json({ application: 'linko-mymarketer', version: '0.2.0', releaseId: config.releaseId, automationBusy: workflow.busy, manualBrowserActive: workflow.manualActive, publishingEnabled: config.publish }));
   app.post('/api/auth/login', (req, res) => access.login(req, res));
   app.post('/api/auth/logout', async (req, res) => { if (manual.lease?.owner === access.session(req)) await manual.stop(access.session(req)); access.logout(req, res); });
-  app.get('/api/config', async (req, res) => res.json({ codex: await codexStatus(), publishEnabled: config.publish, mode: access.origin ? 'tailnet' : 'local', publicOrigin: access.origin, browser: manual.status(access.session(req)) }));
+  app.get('/api/config', async (req, res) => {
+    const choice = workflow.settings.load().ai.everyday, status = await providerStatus(choice.provider);
+    res.json({ everyday: status, codex: { available: choice.provider === 'codex' && status.installed, chatgptSignedIn: choice.provider === 'codex' && status.signedIn }, publishEnabled: config.publish, mode: access.origin ? 'tailnet' : 'local', publicOrigin: access.origin, browser: manual.status(access.session(req)) });
+  });
+  app.get('/api/settings', async (_req, res) => {
+    const [codex, claude] = await Promise.all([providerStatus('codex'), providerStatus('claude')]);
+    res.json({ ...workflow.settings.view(), providers: { codex, claude } });
+  });
+  app.put('/api/settings/ai', (req, res) => {
+    if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the current job before changing AI settings.');
+    const data = workflow.settings.load(); data.ai = aiSchema.parse(req.body); res.json(workflow.settings.save(data));
+  });
+  app.put('/api/settings/telegram', (req, res) => {
+    const patch = z.object({ token: z.string().max(200).optional(), chatId: z.string().regex(/^-?\d*$|^$/).max(100) }).strict().parse(req.body);
+    const data = workflow.settings.load(); data.telegram.chatId = patch.chatId;
+    if (patch.token !== undefined) data.telegram.token = patch.token.trim();
+    res.json(workflow.settings.save(data));
+  });
+  app.post('/api/settings/telegram/test', async (_req, res) => res.json({ sent: await workflow.telegram.send('Linko MyMarketer test message. Notifications are connected.') }));
+  app.post('/api/settings/telegram/detect', async (_req, res) => res.json({ chatIds: await workflow.telegram.detect() }));
   app.get('/api/browser/status', (req, res) => res.json(manual.status(access.session(req))));
   const credentialsSchema = z.object({ identifier: z.string().trim().min(3).max(120), password: z.string().min(1).max(256) }).strict();
   app.get('/api/agent', (_req, res) => res.json(workflow.auth.status()));
@@ -49,6 +69,10 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   app.post('/api/listings/check', (_req, res) => {
     if (workflow.busy || workflow.manualActive || workflow.prepared) throw new WorkflowError('BUSY', 'Finish the current browser task or form review before checking listings.');
     void monitor.check().catch(() => {}); res.status(202).json({ accepted: true });
+  });
+  app.post('/api/listings/:id/delete', async (req, res) => {
+    if (req.body.confirm !== true) throw new WorkflowError('CONFIRM', 'Confirm deleting this listing from MyMarket permanently.');
+    res.json(await workflow.deleteListing(req.params.id));
   });
   app.patch('/api/listings/:id', (req, res) => {
     if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the listing check to finish before changing monitoring.');

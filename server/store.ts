@@ -10,8 +10,14 @@ export class Store {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS attempts(fingerprint TEXT PRIMARY KEY, draft TEXT NOT NULL, state TEXT NOT NULL, receipt TEXT);
-      CREATE TABLE IF NOT EXISTS listing_records(id TEXT PRIMARY KEY, data TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS listing_records(id TEXT PRIMARY KEY, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS learned_steps(id TEXT PRIMARY KEY, data TEXT NOT NULL);`);
   }
+  learned(id: string): import('./replay').SavedStep[] {
+    const row = this.db.prepare('SELECT data FROM learned_steps WHERE id=?').get(id) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : [];
+  }
+  learn(id: string, steps: import('./replay').SavedStep[]) { this.db.prepare('INSERT OR REPLACE INTO learned_steps VALUES (?,?)').run(id, JSON.stringify(steps)); }
   create() {
     const d: Draft = { id: randomUUID(), revision: 0, state: 'draft', title: '', description: '', price: '', currency: 'GEL', model: '', condition: '', location: '', facts: {}, photos: [], coverId: '', category: [], comparables: [], questions: [], fields: [], message: 'Add your photos and a few details to begin.', events: [] };
     this.save(d); return d;
@@ -44,7 +50,7 @@ export class Store {
     if (d.relistOf) {
       const row = this.db.prepare('SELECT data FROM listing_records WHERE id=?').get(d.relistOf) as { data: string } | undefined;
       const record = row && JSON.parse(row.data);
-      if (!record || !record.enabled || !['relisting', 'attention'].includes(record.status) || record.replacementId !== d.id || record.missingCount < 2 || record.fingerprint !== fp) {
+      if (!record || record.deleteRequestedAt || !record.enabled || !['relisting', 'attention'].includes(record.status) || record.replacementId !== d.id || record.missingCount < 2 || record.fingerprint !== fp) {
         throw new WorkflowError('RELIST', 'Re-listing requires a saved recipe and two confirmed missing checks.');
       }
       fp += ':replacement:' + d.relistOf;

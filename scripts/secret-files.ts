@@ -8,6 +8,7 @@ export function isSecretFile(file: string): boolean {
   const name = parts.at(-1)!;
   if (parts.some(part => ['.private', '.ssh', '.aws', 'credentials', 'cookies', 'tokens', 'sessions', 'secrets'].includes(part))) return true;
   if (name === '.env.example' || name === 'runtime.env.example') return false;
+  if (/^settings\.json(?:$|\.)/.test(name)) return true;
   if (/\.env(?:$|\.)/.test(name)) return true;
   if (/\.(pem|key|p12|pfx|keystore)(?:$|\.)/.test(name)) return true;
   if (['auth', 'credential', 'cookie', 'token', 'session', 'secret', 'cookies', 'cookies-journal', 'login data', 'login data-journal', 'local state', '.git-credentials', '.netrc', '_netrc', '.npmrc', 'id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa'].includes(name)) return true;

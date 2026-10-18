@@ -85,3 +85,7 @@ Local State
 *token*.txt*
 *session*.txt*
 *secret*.txt*
+
+# Private AI and Telegram settings, including operator-configured data directories.
+settings.json
+settings.json.*

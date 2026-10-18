@@ -11,6 +11,7 @@ export interface Draft {
   fields: FieldReview[]; message: string; events: { at: string; message: string }[];
   preparedRevision?: number; preparedAt?: string; receipt?: { url: string; at: string; evidence: string };
   relistOf?: string;
+  automation?: import('./replay').RecipeAutomation;
 }
 export class WorkflowError extends Error {
   constructor(public code: string, message: string) { super(message); }

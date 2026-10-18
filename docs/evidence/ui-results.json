@@ -2,11 +2,11 @@
   "config": {
     "argv": [
       "/usr/bin/node",
-      "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/c1c2cad40d4b4e14b0ddad096493f5fc/node_modules/.pnpm/playwright@1.64.0/node_modules/playwright/cli.js",
+      "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/node_modules/playwright/cli.js",
       "test"
     ],
-    "configFile": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/c1c2cad40d4b4e14b0ddad096493f5fc/playwright.config.ts",
-    "rootDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/c1c2cad40d4b4e14b0ddad096493f5fc/tests/ui",
+    "configFile": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/playwright.config.ts",
+    "rootDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/tests/ui",
     "failOnFlakyTests": false,
     "forbidOnly": false,
     "fullyParallel": false,
@@ -22,7 +22,7 @@
     "preserveOutput": "always",
     "projects": [
       {
-        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/c1c2cad40d4b4e14b0ddad096493f5fc/test-results",
+        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/test-results",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
@@ -30,7 +30,7 @@
         },
         "id": "",
         "name": "",
-        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/c1c2cad40d4b4e14b0ddad096493f5fc/tests/ui",
+        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/tests/ui",
         "testIgnore": [],
         "testMatch": [
           "**/*.@(spec|test).?(c|m)[jt]s?(x)"
@@ -42,15 +42,15 @@
       {
         "grep": {},
         "grepInvert": null,
-        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/c1c2cad40d4b4e14b0ddad096493f5fc/test-results",
+        "outputDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/test-results",
         "repeatEach": 1,
         "retries": 0,
         "metadata": {
           "actualWorkers": 1
         },
         "name": "",
-        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/c1c2cad40d4b4e14b0ddad096493f5fc/tests/ui",
-        "snapshotDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/c1c2cad40d4b4e14b0ddad096493f5fc/tests/ui",
+        "testDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/tests/ui",
+        "snapshotDir": "/home/codex/.local/share/linko-bot-manager/assignment-workspaces/cc977b53fb3f4621805bdbeefb9b0bca/tests/ui",
         "testIgnore": [],
         "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
         "timeout": 30000,
@@ -87,6 +87,11 @@
     "version": "1.64.0",
     "workers": 1,
     "webServer": {
+      "env": {
+        "LINKO_DATA_DIR": "/tmp/linko-ui-suite-KkcVeK",
+        "ALLOW_PUBLISH": "false",
+        "LINKO_AUTO_RELIST": "false"
+      },
       "command": "PORT=4311 LINKO_CODEX_BINARY=\"$PWD/tests/fixtures/codex-fixture.mjs\" NODE_ENV=production corepack pnpm exec tsx server/index.ts",
       "url": "http://127.0.0.1:4311",
       "reuseExistingServer": false
@@ -115,12 +120,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2138,
+                  "duration": 2294,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-15T13:56:46.766Z",
+                  "startTime": "2026-10-18T08:27:00.757Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -157,12 +162,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 4055,
+                  "duration": 4893,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-15T13:56:49.042Z",
+                  "startTime": "2026-10-18T08:27:03.214Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -191,12 +196,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 2663,
+                  "duration": 2903,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-15T13:56:53.118Z",
+                  "startTime": "2026-10-18T08:27:08.141Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -208,6 +213,124 @@
           "file": "app.spec.ts",
           "line": 26,
           "column": 1
+        }
+      ]
+    },
+    {
+      "title": "listings.spec.ts",
+      "file": "listings.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "saved listings expose records, pause/resume and the original draft",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1262,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T08:27:11.098Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "4edde57808a4ab4fe11a-796d693eaab0dfd7478d",
+          "file": "listings.spec.ts",
+          "line": 3,
+          "column": 1
+        }
+      ]
+    },
+    {
+      "title": "settings.spec.ts",
+      "file": "settings.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "AI slots and Telegram setup persist at 1360px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2581,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T08:27:12.392Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d877ffdf71ec720167ae-d32a5879b6d525444bae",
+          "file": "settings.spec.ts",
+          "line": 5,
+          "column": 3
+        },
+        {
+          "title": "AI slots and Telegram setup persist at 390px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1629,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-18T08:27:14.996Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "d877ffdf71ec720167ae-dacf1267406274bd631c",
+          "file": "settings.spec.ts",
+          "line": 5,
+          "column": 3
         }
       ]
     },
@@ -233,12 +356,12 @@
                   "workerIndex": 0,
                   "parallelIndex": 0,
                   "status": "passed",
-                  "duration": 1259,
+                  "duration": 1713,
                   "errors": [],
                   "stdout": [],
                   "stderr": [],
                   "retry": 0,
-                  "startTime": "2026-10-15T13:56:55.807Z",
+                  "startTime": "2026-10-18T08:27:16.647Z",
                   "annotations": [],
                   "attachments": []
                 }
@@ -256,9 +379,9 @@
   ],
   "errors": [],
   "stats": {
-    "startTime": "2026-10-15T13:56:42.777Z",
-    "duration": 14376.551,
-    "expected": 4,
+    "startTime": "2026-10-18T08:26:55.167Z",
+    "duration": 23362.989,
+    "expected": 7,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

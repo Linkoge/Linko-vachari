@@ -6,6 +6,7 @@ export const navigationLabel = /search|next|continue|back|add (?:listing|item|pr
 export function sourceValue(d: Draft, source: string, query: string) {
   if (source === 'query') return query;
   if (source === 'category') return d.category.join(' > ');
+  if (source.startsWith('fields.')) return d.fields.find(f => f.label === source.slice(7))?.value || '';
   if (source.startsWith('facts.')) return d.facts[source.slice(6)] || '';
   if (['title', 'description', 'price', 'currency', 'model', 'condition', 'location'].includes(source)) return String(d[source as keyof Draft] || '');
   return '';

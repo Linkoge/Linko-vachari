@@ -7,12 +7,12 @@ import type { Workflow } from './workflow';
 import { Draft, WorkflowError } from './types';
 
 export const CHECK_INTERVAL = 3 * 60 * 60_000;
-export const MISSING_RECHECK = 10 * 60_000;
+export const MISSING_RECHECK = 60 * 60_000;
 export interface ListingRecord {
   id: string; recipe: Draft; fingerprint: string; receipt?: Draft['receipt'];
-  enabled: boolean; status: 'unverified' | 'active' | 'missing' | 'unavailable' | 'relisting' | 'replaced' | 'attention';
+  enabled: boolean; status: 'unverified' | 'active' | 'missing' | 'unavailable' | 'relisting' | 'replaced' | 'attention' | 'deleting' | 'deleted_by_owner';
   missingCount: number; firstMissingAt?: number; checkedAt?: number; nextCheckAt: number;
-  message: string; replacementId?: string;
+  message: string; replacementId?: string; deleteRequestedAt?: number; deletionNotified?: boolean;
 }
 // JSON string literals preserve Markdown/newlines verbatim without allowing item text to alter the document.
 const literal = (value: unknown) => JSON.stringify(value).replace(/`/g, '\\u0060');
@@ -59,6 +59,7 @@ export class ListingArchive {
   published(d: Draft) {
     if (d.state !== 'published' || !d.receipt || !isListingUrl(d.receipt.url)) return;
     const r = this.snapshot(d);
+    if (d.automation) r.recipe.automation = structuredClone(d.automation);
     if (!r.receipt) { r.receipt = d.receipt; r.status = 'active'; r.message = 'Published and verified. Scheduled for checks every three hours.'; this.write(r); }
   }
   recover() {
@@ -75,6 +76,10 @@ export class ListingArchive {
       }
     }
     for (const r of this.all()) {
+      if (r.deleteRequestedAt) {
+        r.enabled = false;
+        if (r.status !== 'deleted_by_owner') { r.status = 'attention'; r.message = 'Owner deletion may have been interrupted. Inspect MyMarket. This item will never be automatically re-listed.'; }
+      }
       if (r.status === 'relisting') {
         const replacement = r.replacementId && this.store.get(r.replacementId);
         r.status = replacement && replacement.state === 'published' ? 'replaced' : 'attention';
@@ -84,7 +89,9 @@ export class ListingArchive {
     }
   }
   pause(id: string, enabled: boolean) {
-    const r = this.get(id); r.enabled = enabled; r.missingCount = 0; delete r.firstMissingAt;
+    const r = this.get(id);
+    if (r.deleteRequestedAt || ['deleting','deleted_by_owner','replaced','relisting'].includes(r.status)) throw new WorkflowError('LOCKED', 'This record is permanently retired from monitoring.');
+    r.enabled = enabled; r.missingCount = 0; delete r.firstMissingAt;
     r.nextCheckAt = Date.now(); this.write(r); return r;
   }
 }
@@ -108,7 +115,16 @@ export class ListingMonitor {
       if (!response || browser.isChallengePage(await page.title(), text.slice(0, 800)) || onAuthPage(page.url()) || await page.locator('input[type="password"]:visible').count()) return 'unavailable';
       // Redirects to home/login/search and 200 error shells are inconclusive, never evidence of deletion.
       if (page.url().split('?')[0].replace(/\/$/, '') !== r.receipt.url.split('?')[0].replace(/\/$/, '')) return 'unavailable';
-      if ([404, 410].includes(response.status())) return 'missing';
+      if ([404, 410].includes(response.status())) {
+        // A real, independently loaded control must work before any 404/410 counts as evidence.
+        const control = await browser.context!.newPage();
+        try {
+          const response = await control.goto('https://mymarket.ge/', { waitUntil: 'domcontentloaded', timeout: 15_000 });
+          const text = await control.locator('body').innerText({ timeout: 5000 });
+          if (!response || response.status() !== 200 || !/^(www\.)?mymarket\.ge$/.test(new URL(control.url()).hostname) || onAuthPage(control.url()) || await control.locator('input[type="password"]:visible').count() || browser.isChallengePage(await control.title(), text.slice(0,800)) || !/mymarket|მაიმარკეტ/i.test((await control.title()) + text) || text.trim().length < 20 || !/search|categor|ძებნ|ძიება|კატეგორ/i.test(text)) return 'unavailable';
+          return 'missing';
+        } catch { return 'unavailable'; } finally { await control.close(); }
+      }
       if (response.status() !== 200 || !text.includes(r.recipe.title) || !text.includes(r.recipe.price)) return 'unavailable';
       return 'active';
     } finally { await page.close(); }
@@ -120,18 +136,21 @@ export class ListingMonitor {
     if (flow.prepared) return;
     flow.busy = true;
     try {
-      const records = this.archive.all().filter(r => r.enabled && r.receipt && ['active', 'missing', 'unavailable'].includes(r.status) && r.nextCheckAt <= now);
+      const records = this.archive.all().filter(r => !r.deleteRequestedAt && r.enabled && r.receipt && ['active', 'missing', 'unavailable'].includes(r.status) && r.nextCheckAt <= now);
       // Bound each queue pass; remaining due records run on the next minute tick.
       for (const r of records.slice(0, 5)) {
         const result = await this.probe(r).catch(() => 'unavailable' as const);
         r.checkedAt = now; r.nextCheckAt = now + CHECK_INTERVAL;
         if (result !== 'missing') {
-          r.status = result; r.missingCount = 0; delete r.firstMissingAt;
+          r.status = result; if (result === 'active') r.deletionNotified = false; r.missingCount = 0; delete r.firstMissingAt;
           r.message = result === 'active' ? 'Public listing verified.' : 'Check inconclusive (login, challenge, changed page or network). No re-listing attempted.';
         } else {
           r.status = 'missing'; r.missingCount++; r.firstMissingAt ??= now;
           r.nextCheckAt = now + MISSING_RECHECK;
           r.message = 'Public listing returned 404/410. Waiting for a separate confirmation before re-listing.';
+          if (r.missingCount >= 2 && now - r.firstMissingAt! >= MISSING_RECHECK && !r.deletionNotified) {
+            r.deletionNotified = true; this.workflow.telegram.notify(`Listing confirmed deleted by MyMarket: ${r.recipe.title}. ${r.receipt!.url}`);
+          }
           if (r.missingCount >= 2 && (!config.publish || !config.autoRelist)) {
             r.nextCheckAt = now + CHECK_INTERVAL;
             r.message = 'Confirmed missing. Automatic re-listing is disabled in server configuration.';
@@ -144,6 +163,8 @@ export class ListingMonitor {
   }
   async relist(r: ListingRecord) {
     const flow = this.workflow;
+    const latest = this.archive.get(r.id);
+    if (latest.deleteRequestedAt || latest.replacementId || !latest.enabled || !config.publish || !config.autoRelist) return;
     // Persist the one replacement ID before any browser action. Blocked/uncertain runs require human review.
     const d: Draft = { ...structuredClone(r.recipe), id: this.archive.store.create().id, revision: 0, state: 'review', events: [], relistOf: r.id };
     delete d.receipt; delete d.preparedAt; delete d.preparedRevision;
@@ -156,12 +177,25 @@ export class ListingMonitor {
       if (d.state !== 'ready') throw new WorkflowError('FORM', 'The current form requires review.');
       // Recheck on a separate tab after preparing so recovery/flapping cannot cause a duplicate.
       if (await this.probe(r) !== 'missing') throw new WorkflowError('RELIST', 'The old listing could not be confirmed missing immediately before replacement.');
-      await flow.publish(d);
+      await flow.fixit(r.recipe.title + ' pre-submit', () => flow.publish(d), async () => {
+        // Repair only preparation. publish catches every uncertain post-claim outcome itself, so this cannot retry a submit.
+        await flow.prepareAI(d);
+        if (d.state !== 'ready') throw new WorkflowError('UNCERTAIN', 'Fix-it could not confidently restore the form before submission.');
+        this.archive.store.save(d);
+        if (await this.probe(r) !== 'missing') throw new WorkflowError('RELIST', 'The old listing is no longer confirmed missing.');
+        await flow.publish(d);
+        if ((d as Draft).state !== 'published') throw new WorkflowError('UNCERTAIN', 'The single replacement submission could not be verified.');
+      });
       if ((d as Draft).state !== 'published') throw new WorkflowError('RELIST', 'The replacement outcome needs review.');
       r.status = 'replaced'; r.message = 'Replacement verified; monitoring continues on its record.';
-    } catch {
+      flow.telegram.notify(`Re-list succeeded: ${r.recipe.title}. ${d.receipt!.url}`);
+    } catch (e) {
       if (!['published', 'unknown'].includes(d.state)) d.state = 'blocked';
-      r.status = 'attention'; r.message = 'Automatic re-listing stopped. Inspect the replacement draft and MyMarket account; no automatic retry will run.';
-    } finally { flow.prepared = undefined; this.archive.store.save(d); this.archive.write(r); }
+      r.status = 'attention'; r.message = e instanceof WorkflowError ? e.message + ' Automatic re-listing stopped; no automatic retry will run.' : 'Automatic re-listing stopped. Inspect the replacement draft and MyMarket account; no automatic retry will run.';
+      flow.telegram.notify(`Attention: ${r.recipe.title}. ${r.message}`);
+    } finally {
+      if (['ready','published'].includes(d.state) && d.automation) r.recipe.automation = structuredClone(d.automation);
+      flow.prepared = undefined; this.archive.store.save(d); this.archive.write(r);
+    }
   }
 }

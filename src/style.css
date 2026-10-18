@@ -11,3 +11,5 @@
  .listing-records summary { cursor: pointer; font-weight: 600; }
  .listing-records article { padding: 16px 0; border-top: 1px solid #e3e8e5; }
  .listing-records p { margin: 10px 0; overflow-wrap: anywhere; }
+
+.connection-settings{border-top:1px solid #e3e8dc;margin-top:20px;padding-top:12px}.connection-settings fieldset{border:1px solid #dbe3d0;border-radius:10px;margin:16px 0;padding:14px;min-width:0}.connection-settings legend{font-weight:650;color:#516a42}.connection-settings h3{margin-top:25px}.connection-settings p[role=status],.connection-settings p[role=alert]{overflow-wrap:anywhere;color:#536943}.settings-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:15px}.connection-settings label{margin:12px 0}.settings-entry{margin-right:auto;padding:8px}.listing-records button{min-height:36px}.connection-settings input,.connection-settings select{font-size:16px}.connection-settings .button{white-space:normal}.connection-settings ol{padding-left:20px}.modal:has(.connection-settings){width:620px}

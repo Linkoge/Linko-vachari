@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { isSecretFile, trackedSecretFiles } from '../scripts/secret-files';
 
 const privatePaths = [
+  'settings.json', 'nested/settings.json.tmp',
   '.env', '.env.local', 'nested/.env.production', 'deploy/runtime.env',
   'nested/client.pem', 'nested/client.key', 'client.pem.bak', 'client.p12', 'client.pfx', 'client.keystore',
   'credentials.json', 'nested/service-credentials.json', 'credentials.json.bak',
