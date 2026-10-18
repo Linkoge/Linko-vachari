@@ -119,9 +119,9 @@ export function App() {
     const task = (async () => {
       for (let attempt = 0; ; attempt++) {
         const snapshot = current.current!; const v = version.current;
-        const { accountId, revision, title, description, price, currency, model, condition, location, category, facts, coverId } = snapshot;
+        const { accountId, revision, title, description, price, currency, model, condition, location, category, facts, coverId, estimateMissing } = snapshot;
         try {
-          const next = await api<Draft>('/drafts/' + snapshot.id, { accountId, revision, title, description, price, currency, model, condition, location, category, facts, coverId, photoOrder: snapshot.photos.map(p => p.id) }, 'PATCH');
+          const next = await api<Draft>('/drafts/' + snapshot.id, { accountId, revision, title, description, price, currency, model, condition, location, category, facts, coverId, estimateMissing, photoOrder: snapshot.photos.map(p => p.id) }, 'PATCH');
           if (current.current?.id === snapshot.id) {
             if (v === version.current) show(next, false, false);
             else show({ ...current.current, revision: next.revision }, true, false);
@@ -195,7 +195,7 @@ export function App() {
       }
     }
   }
-  async function action(op: 'analyze' | 'publish') {
+  async function action(op: 'analyze' | 'details' | 'publish') {
     if (pendingUploads.current.length) return;
     await perform(async () => {
       const d = await save();
@@ -233,12 +233,18 @@ export function App() {
           <label>Listing title<input value={draft?.title || ''} maxLength={120} onChange={e => edit('title', e.target.value)}/></label>
           <label>Asking price<div className="price-input"><input aria-label="Asking price" inputMode="decimal" value={draft?.price || ''} onChange={e => edit('price', e.target.value)}/><select aria-label="Currency" value={draft?.currency || 'GEL'} onChange={e => edit('currency', e.target.value)}><option value="GEL">₾ GEL</option><option value="USD">$ USD</option></select></div></label>
           <label>Description<textarea aria-label="Description" rows={4} maxLength={6000} value={draft?.description || ''} onChange={e => edit('description', e.target.value)}/></label>
+          {draft?.descriptionRewritten && draft.originalDescription !== undefined && <button className="text-button description-undo" onClick={() => { edit('description', draft.originalDescription!); edit('descriptionRewritten', false); }}>Undo description improvement</button>}
           <label>Listing account<select aria-label="Listing account" value={draft?.accountId || ''} onChange={e => { edit('location', accounts.find(a => a.id === e.target.value)?.defaults?.location || defaultCity); edit('accountId', e.target.value); }}><option value="" disabled>Choose account</option>{accounts.map(a => <option value={a.id} key={a.id}>{a.label} · {a.activeListings} of 5 used</option>)}</select></label>
           <label className="listing-location">City<input maxLength={200} value={draft?.location || listingAccount?.defaults?.location || defaultCity} onChange={e => edit('location', e.target.value)}/></label>
           <div className="category-row"><label>Category path<input value={categoryText} onChange={e => { edit('category', e.target.value.split('>').map(s => s.trim()).filter(Boolean)); setCategoryText(e.target.value); }}/></label><button className="button ghost" disabled={disabled || uploading || !online || !basics} aria-describedby={uploading ? 'photo-upload-reason' : undefined} onClick={() => void action('analyze')}>Find category</button></div>
+          <label className="estimate-details"><input type="checkbox" checked={draft?.estimateMissing || false} onChange={e => { edit('estimateMissing', e.target.checked); if (e.target.checked && draft?.category.length && online && !uploading) void action('details'); }}/>Estimate missing details</label>
+          {!!draft?.specFields?.length && <div className="spec-fields" aria-label="Category details">{draft.specFields.map(f => {
+            const value = draft.facts[f.key] || '', missing = f.required && !value, source = draft.detailSources?.[f.key];
+            return <label key={f.key} className={missing ? 'missing-detail' : ''}><span>{f.label}{missing && <small>Required</small>}{!!value && source && source !== 'owner' && <small>{source === 'estimated' ? 'estimated' : source === 'input' ? 'AI · from text' : 'AI · looked up'}</small>}</span>{f.options.length ? <select aria-label={f.label} aria-required={f.required} value={value} onChange={e => { edit('facts', { ...current.current!.facts, [f.key]: e.target.value }); edit('detailSources', { ...current.current!.detailSources, [f.key]: 'owner' }); }}><option value="">Choose</option>{f.options.map(o => <option key={o}>{o}</option>)}</select> : <input aria-label={f.label} aria-required={f.required} value={value} maxLength={500} onChange={e => { edit('facts', { ...current.current!.facts, [f.key]: e.target.value }); edit('detailSources', { ...current.current!.detailSources, [f.key]: 'owner' }); }}/>}</label>;
+          })}</div>}
           {uploading && <p id="photo-upload-reason" role="status">Uploading photos…</p>}
-          {!!draft?.categoryCandidates?.length && <fieldset className="category-choices"><legend>Choose a category</legend>{draft.categoryCandidates.map(path => <button className="button ghost" key={path.join(' > ')} onClick={() => edit('category', path)}>{path.join(' › ')}</button>)}</fieldset>}
-          {!!draft?.questions.length && <div className="required-facts" aria-label="Required information"><p>Needs info · answer below, then press Publish.</p>{draft.questions.map(q => {
+          {!!draft?.categoryCandidates?.length && <fieldset className="category-choices"><legend>Choose a category</legend>{draft.categoryCandidates.map(path => <button className="button ghost" key={path.join(' > ')} onClick={() => { edit('category', path); void action('details'); }}>{path.join(' › ')}</button>)}</fieldset>}
+          {!!draft?.questions.filter(q => !draft.specFields?.some(f => f.key === q.key)).length && <div className="required-facts" aria-label="Required information"><p>Needs info · answer below, then press Publish.</p>{draft.questions.filter(q => !draft.specFields?.some(f => f.key === q.key)).map(q => {
             const field = accountField(q), value = field === 'location' ? draft.location || listingAccount?.defaults?.location || defaultCity : field === 'phone' ? draft.facts[q.key] || draft.facts.phone || '' : draft.facts[q.key] || '';
             const answer = (v: string) => {
               if (field === 'location') edit('location', v);

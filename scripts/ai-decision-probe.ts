@@ -15,6 +15,8 @@ const key = process.argv[4] || 'category';
 const effort = process.argv[5] === 'high' ? 'high' : 'low';
 const samples = {
   action: { action: 'done', target: '', source: '', value: '', questions: [], reason: 'Synthetic probe' },
+  descriptionCheck: { sameLanguage: true, factsSupported: true },
+  details: { description: '', answers: [] },
   answers: { answers: [] }, equivalent: { equivalent: true },
   category: { title: 'Lamp', confident: true, path: ['Lighting', 'Studio lamps'], candidates: [] },
   identity: { title: 'Lamp', query: 'studio lamp', queries: ['studio lamp', 'photography light', 'lighting'] },

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Workflow } from './workflow';
 import { WorkflowError } from './types';
 
-export interface Job { id: string; draft: string; operation: 'analyze' | 'submit'; status: string; createdAt: number }
+export interface Job { id: string; draft: string; operation: 'analyze' | 'details' | 'submit'; status: string; createdAt: number }
 /** Durable FIFO. The shared browser serializes all jobs, including every account's jobs. */
 export class PublishQueue {
   private timer?: ReturnType<typeof setInterval>;

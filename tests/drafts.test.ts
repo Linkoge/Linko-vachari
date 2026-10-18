@@ -167,7 +167,8 @@ test('requirements found by the final form check are derived before asking the o
     if (!d.facts.Condition) { d.questions = [{ key: 'Condition', label: 'Condition', options: ['New', 'Used'] }]; d.state = 'needs_input'; }
     else { d.questions = []; d.state = 'ready'; }
   };
-  f.workflow.decide = async (_schema, instructions) => (instructions.startsWith('Compare only') ? { equivalent: true } : { answers: [{ key: 'Condition', value: 'Used', evidence: 'Used' }] }) as any;
+  d.specFields = [{ key: 'Condition', label: 'Condition', options: ['New', 'Used'], required: true, kind: 'owner' }];
+  f.workflow.brain = (async (_schema, instructions) => instructions.startsWith('Compare only') ? { equivalent: true } : { description: '', answers: [{ key: 'Condition', value: 'Used', source: 'owner', evidence: 'Used', url: '' }] }) as typeof f.workflow.brain;
   try { await f.workflow.prepareAI(d); assert.equal(passes, 2); assert.equal(d.state, 'ready'); assert.deepEqual(d.facts, { Condition: 'Used' }); }
   finally { f.store.db.close(); }
 });

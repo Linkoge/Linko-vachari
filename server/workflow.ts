@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { join } from 'node:path';
+import { fillDetails } from './details';
+import { SpecCache, snapshotFields, specKey } from './specs';
+import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Locator, Page } from 'playwright';
 import { ask } from './codex';
@@ -31,6 +33,7 @@ export class Workflow {
   accounts: Accounts;
   categories = new CategoryTree();
   archive: ListingArchive;
+  specCache: SpecCache;
   aiSlot: AISlot = 'everyday';
   telegram: Telegram;
   replaying = false;
@@ -47,7 +50,7 @@ export class Workflow {
       finally { this.aiSlot = previous; }
     }
   }
-  constructor(public store: Store, public brain: typeof ask = ask, vault = new CredentialVault(), public settings: SettingsStore = defaultSettings) { this.accounts = new Accounts(vault, store); this.auth = new LoginAgent(this, this.accounts.vault(this.accounts.defaultId || 'legacy')); this.archive = new ListingArchive(store); this.telegram = new Telegram(this.settings); }
+  constructor(public store: Store, public brain: typeof ask = ask, vault = new CredentialVault(), public settings: SettingsStore = defaultSettings) { this.specCache = new SpecCache(join(dirname(store.archiveDir), 'category-forms.json')); this.accounts = new Accounts(vault, store); this.auth = new LoginAgent(this, this.accounts.vault(this.accounts.defaultId || 'legacy')); this.archive = new ListingArchive(store); this.telegram = new Telegram(this.settings); }
   async useAccount(d: Pick<Draft, 'accountId'>) {
     const id = d.accountId || 'legacy'; this.accounts.require(id);
     if (this.browser.accountId !== id) {
@@ -62,7 +65,7 @@ export class Workflow {
     void (async () => { await this.useAccount({ accountId: this.accounts.defaultId }); await this.auth.ensureSignedIn(); })()
       .catch(() => {}).finally(() => { this.busy = false; });
   }
-  async run(id: string, operation: 'analyze' | 'prepare' | 'publish' | 'submit') {
+  async run(id: string, operation: 'analyze' | 'details' | 'prepare' | 'publish' | 'submit') {
     if (this.busy) throw new WorkflowError('BUSY', 'The marketplace browser is in use. Wait for the current listing.');
     this.busy = true;
     const d = this.store.get(id);
@@ -84,7 +87,8 @@ export class Workflow {
       else {
         this.prepared = undefined; delete d.preparedRevision;
         d.state = operation === 'analyze' ? 'analyzing' : 'preparing'; this.store.event(d, operation === 'analyze' ? 'The Everyday AI is finding comparable items from your description and model…' : 'Opening the live listing form and checking its requirements…');
-        if (operation === 'analyze') await this.analyze(d); else await this.prepare(d);
+        if (operation === 'details') await this.initializeDetails(d);
+        else if (operation === 'analyze') { await this.analyze(d); if (d.category.length) await this.initializeDetails(d); } else await this.prepare(d);
       }
     } catch (e) {
       if (d.state !== 'unknown' && d.state !== 'published') d.state = 'blocked';
@@ -96,6 +100,65 @@ export class Workflow {
       if (operation === 'submit') { this.prepared = undefined; this.automatic = false; }
       this.store.save(d); this.busy = false;
     }
+  }
+  async initializeDetails(d: Draft) {
+    let fields = this.specCache.get(d.category);
+    if (!fields) {
+      await this.auth.ensureSignedIn(m => this.store.event(d, m));
+      const result = await this.agent(this.browser.page!, d, 'prepare', '', 50, true);
+      if (!result) throw new WorkflowError('FORM', 'Could not read the live category form. Find the category again.');
+      fields = await this.readSpecFields(this.browser.page!, result.snapshot);
+      this.specCache.set(d.category, fields);
+    }
+    await fillDetails(this, d, fields, true);
+    d.state = d.questions.length ? 'needs_input' : 'review';
+    this.store.event(d, d.questions.length ? 'Review the highlighted required details below.' : 'Category details filled. Review and edit them below.');
+  }
+  async readSpecFields(page: Page, snapshot: Snapshot) {
+    // Custom selects reveal their allowed values only when opened. Never select a value here.
+    const offered = snapshotFields(snapshot);
+    const labels = snapshot.elements.filter(e => e.role === 'combobox' && !e.disabled && offered.some(f => f.label === (e.group || e.label))).map(e => e.group || e.label);
+    const options = new Map<string, string[]>();
+    for (const label of labels) {
+      const current = await this.browser.snapshot(page);
+      const e = current.elements.find(e => e.role === 'combobox' && (e.group || e.label) === label);
+      if (!e) continue;
+      const loc = page.locator(`[data-linko="${e.id}"]`);
+      await loc.click({ timeout: 5000 });
+      let open = await this.browser.snapshot(page);
+      for (let attempt = 0; attempt < 20 && !open.elements.some(o => o.role === 'option' && !o.disabled); attempt++) {
+        await page.waitForTimeout(200); open = await this.browser.snapshot(page);
+      }
+      const values = open.elements.filter(o => o.role === 'option' && !o.disabled).map(o => o.label);
+      options.set(label, [...new Set(values)]);
+      await loc.press('Escape', { timeout: 5000 });
+      // Some MyMarket dropdowns do not handle Escape. A blur closes those.
+      await loc.evaluate(el => (el as HTMLElement).blur());
+    }
+    const fields = offered;
+    for (const f of fields) if (options.has(f.label)) {
+      f.options = options.get(f.label)!;
+      if (!f.options.length) throw new WorkflowError('FORM', `The live options for ${f.label} could not be read. Try Find category again.`);
+    }
+    return fields;
+  }
+  async reconcileDetails(d: Draft, questions: Draft['questions']) {
+    let fields = structuredClone(d.specFields || []);
+    if (questions.some(q => !accountField(q) && !fields.some(f => f.key === q.key || f.label === q.label))) {
+      const live = await this.readSpecFields(this.browser.page!, await this.browser.snapshot());
+      fields = live;
+    }
+    for (const q of questions) {
+      if (accountField(q)) continue;
+      const field = fields.find(f => f.key === q.key || f.label === q.label);
+      if (!field) throw new WorkflowError('FORM', 'A requested detail could not be matched to a live form control. Prepare again.');
+      field.required = true; // Options always come from the live schema, never from action-model wording.
+    }
+    this.specCache.set(d.category, fields);
+    const before = JSON.stringify(d.facts);
+    await fillDetails(this, d, fields);
+    d.questions.push(...questions.filter(q => accountField(q)));
+    return before !== JSON.stringify(d.facts);
   }
   async deriveRequired(d: Draft, questions: Draft['questions']) {
     questions = questions.filter(q => accountField(q) !== 'phone');
@@ -157,6 +220,8 @@ export class Workflow {
     const loc = page.locator(`[data-linko="${e.id}"]`);
     if (await loc.count() !== 1) throw new WorkflowError('STALE', 'The marketplace control changed. Try this step again.');
     const value = sourceValue(d, dec.source, query);
+    const field = d.specFields?.find(f => f.label === (e.group || e.label));
+    if (field && ['fill', 'select'].includes(dec.action) && (dec.source !== `facts.${field.key}` || (e.tag === 'select' && dec.value !== d.facts[field.key]))) throw new WorkflowError('FACT', 'The form value must match the saved listing detail.');
     if (dec.action === 'click') {
       if (e.href && !allowedUrl(e.href)) throw new WorkflowError('DOMAIN', 'The marketplace requested an unsupported navigation. Inspect it in the local browser.');
       let verifiedOption = '';
@@ -222,7 +287,8 @@ export class Workflow {
     await page.waitForTimeout(300);
     if (radio && !await checked()) throw new WorkflowError('FORM', 'A form option could not be selected. Inspect the live form and prepare again.');
   }
-  async agent(page: Page, d: Draft, phase: 'search' | 'prepare', query: string, maxSteps: number) {
+  async agent(page: Page, d: Draft, phase: 'search' | 'prepare', query: string, maxSteps: number, discover = false) {
+    let checkedSchema = false;
     let failures = 0, signIns = 0, uploaded = false; const history: string[] = [];
     for (let i = 0; i < maxSteps; i++) {
       const snapshot = await this.browser.snapshot(page);
@@ -231,7 +297,7 @@ export class Workflow {
         if (signIns++ >= 1) throw new WorkflowError('LOGIN', 'MyMarket asked for sign-in again. Open the assistant window to sign in, then retry.');
         await this.auth.ensureSignedIn(m => this.store.event(d, m)); history.push('Signed in by the login assistant; continue the task.'); continue;
       }
-      if (phase === 'prepare') {
+      if (phase === 'prepare' && !discover) {
         if (await this.fillAccountFields(page, snapshot, d)) continue;
         const missing = snapshot.elements.filter(e => e.required && !e.hasValue && phoneLabel.test(e.label + (e.group || '')));
         if (missing.length) {
@@ -239,21 +305,48 @@ export class Workflow {
           d.state = 'needs_input'; this.store.event(d, 'Add the required mobile phone below or save it in Settings → Accounts, then press Publish.'); return null;
         }
       }
-      const dec = await this.decide(decisionSchema, operatingInstructions, JSON.stringify({ task: phase === 'search' ? `Search comparable items for ${query}. Return done when relevant product links are visible.` : 'Find the add-listing entry, reconcile the supplied category with live options, descend through all live children to a selectable leaf (never stop at a parent), fill all required known fields, upload photos cover first, and stop with done at the final publishing control. Do not publish. Return blocked and missing questions if necessary.', draft: { title: d.title, description: d.description, price: d.price, currency: d.currency, model: d.model, condition: d.condition, location: d.location, facts: itemFacts(d.facts, d.questions), category: d.category, photoCount: d.photos.length, savedFields: d.fields }, uploaded, query, history: history.slice(-12), page: snapshot }));
+      const dec = await this.decide(decisionSchema, operatingInstructions, JSON.stringify({ task: discover ? 'Read the live category form: navigate to Add listing and select the supplied full category path, descending to a leaf. Return done as soon as its final listing form is visible. Do not fill item fields, upload photos, submit, or ask about missing facts. They will be filled later. Select only category controls.' : phase === 'search' ? `Search comparable items for ${query}. Return done when relevant product links are visible.` : 'Find the add-listing entry, reconcile the supplied category with live options, descend through all live children to a selectable leaf (never stop at a parent), fill all required known fields, upload photos cover first, and stop with done at the final publishing control. Do not publish. Return blocked and missing questions if necessary.', draft: { title: d.title, description: d.description, price: d.price, currency: d.currency, model: d.model, condition: d.condition, location: d.location, facts: itemFacts(d.facts, d.questions), specFields: d.specFields, category: d.category, photoCount: d.photos.length, savedFields: d.fields }, uploaded, query, history: history.slice(-12), page: snapshot }));
+      if (!discover && phase === 'prepare') {
+        if (!checkedSchema && ['blocked', 'done'].includes(dec.action) && snapshot.elements.some(e => publishLabel.test(e.label))) {
+          checkedSchema = true;
+          const fields = await this.readSpecFields(page, snapshot);
+          if (JSON.stringify(fields) !== JSON.stringify(d.specFields || [])) {
+            this.specCache.set(d.category, fields);
+            await fillDetails(this, d, fields, true);
+          }
+          continue; // Dropdown observations change semantic IDs.
+        }
+      }
       if (dec.action === 'category_unavailable') throw new WorkflowError('CATEGORY_UNAVAILABLE', 'The chosen category is no longer offered on the live form.');
       if (dec.action === 'blocked') {
-        if (this.automatic && dec.questions.length && await this.deriveRequired(d, dec.questions)) { history.push('Required facts extracted from supplied item text; use facts.<key>.'); continue; }
-        d.questions = dec.questions; if (d.questions.length) { d.state = 'needs_input'; this.store.event(d, 'The live form needs a few more facts. Please answer below, then press Publish.'); return null; } throw new WorkflowError('FORM', 'The current marketplace form needs manual inspection. Retry automatic sign-in and try again.'); }
+        if (discover && snapshot.elements.some(e => publishLabel.test(e.label))) return { snapshot, uploaded };
+        if (!discover && dec.questions.length) {
+          if (await this.reconcileDetails(d, dec.questions) || !d.questions.length) { history.push('Required details are saved in facts; fill each matching live control from facts.<key>.'); continue; }
+          d.state = 'needs_input'; this.store.event(d, 'The live form needs a few more facts. Please answer below, then press Publish.'); return null;
+        }
+        throw new WorkflowError('FORM', 'The current marketplace form needs manual inspection. Retry automatic sign-in and try again.');
+      }
+      if (discover && dec.action === 'done' && !snapshot.elements.some(e => publishLabel.test(e.label))) throw new WorkflowError('FORM', 'A final category form was not visible. Try Find category again.');
       if (dec.action === 'done') return { snapshot, uploaded };
+      if (discover && (!['click', 'select', 'wait'].includes(dec.action) || (dec.action === 'select' && dec.source !== 'category') || (dec.action === 'click' && dec.source && dec.source !== 'category'))) throw new WorkflowError('FORM', 'The category form could not be read without changing item fields. Retry Find category.');
       try {
         if (dec.action === 'upload' && uploaded) throw new WorkflowError('PHOTO', 'Photos were already uploaded in this form. Inspect the browser before retrying.');
         const target = snapshot.elements.find(e => e.id === dec.target);
         await this.step(page, snapshot, dec, d, phase, query);
-        if (phase === 'prepare' && target && !privateControl(target) && ['click','fill','select','upload'].includes(dec.action)) d.automation!.steps.push({ action: dec.action as 'click' | 'fill' | 'select' | 'upload', target: signature(target), source: dec.source, value: dec.value });
+        if (phase === 'prepare' && !discover && target && !privateControl(target) && ['click','fill','select','upload'].includes(dec.action)) d.automation!.steps.push({ action: dec.action as 'click' | 'fill' | 'select' | 'upload', target: signature(target), source: dec.source, value: dec.value });
         if (dec.action === 'upload') uploaded = true;
         failures = 0; history.push(`${dec.action} ${snapshot.elements.find(e => e.id === dec.target)?.label || ''}`);
       } catch (e) {
-        if (e instanceof WorkflowError) throw e;
+        if (e instanceof WorkflowError) {
+          if (e.code === 'FACT' && phase === 'prepare' && !discover) {
+            const fields = await this.readSpecFields(page, await this.browser.snapshot(page));
+            if (JSON.stringify(fields) !== JSON.stringify(d.specFields || [])) {
+              this.specCache.set(d.category, fields); await fillDetails(this, d, fields, true);
+              history.push('Live field options changed. Use the refreshed saved details.'); continue;
+            }
+          }
+          throw e;
+        }
         // Failed clicks/fills are re-observed, never blindly replayed. Upload is not retried.
         if (dec.action === 'upload' || ++failures >= 2) throw new WorkflowError('BROWSER', 'The live form did not respond reliably. Prepare again; no publish action was taken.');
         history.push('Control changed; re-observe and choose a current control.');
@@ -411,7 +504,7 @@ export class Workflow {
         if (!d.category.length) return;
         await this.prepareWithCategory(d);
       }
-      if (!this.automatic || d.state !== 'needs_input' || !d.questions.length || pass === 2 || !await this.deriveRequired(d, d.questions)) return;
+      if (d.state !== 'needs_input' || !d.questions.length || pass === 2 || !await this.reconcileDetails(d, d.questions)) return;
       d.state = 'preparing';
     }
   }
@@ -427,9 +520,14 @@ export class Workflow {
     const result = await this.agent(page, d, 'prepare', '', 50);
     if (!result) return;
     const buttons = result.snapshot.elements.filter(e => ['button', 'input'].includes(e.tag) && publishLabel.test(e.label) && !e.disabled);
-    const missing = result.snapshot.elements.filter(e => e.required && !e.hasValue && e.type !== 'file' && e.type !== 'hidden');
-    if (missing.length) { d.questions = missing.map(e => ({ key: e.label.slice(0, 100), label: e.label, options: e.options })); d.state = 'needs_input'; this.store.event(d, 'Please supply the remaining required facts from the live form.'); return; }
+    const missing = result.snapshot.elements.filter(e => e.required && !e.hasValue && e.type !== 'file' && e.type !== 'hidden' && !(e.type === 'radio' && result.snapshot.elements.some(r => r.type === 'radio' && r.group === e.group && r.checked)));
+    if (missing.length) { d.questions = missing.map(e => { const label = e.group || e.label, field = d.specFields?.find(f => f.label === label); return { key: field?.key || specKey(label), label, options: field?.options || e.options }; }).filter((q, i, all) => all.findIndex(other => other.key === q.key) === i); d.state = 'needs_input'; this.store.event(d, 'Please supply the remaining required facts from the live form.'); return; }
     if (!result.uploaded || buttons.length !== 1) throw new WorkflowError('FORM', 'The app could not verify uploaded photos and a unique publishing control. Inspect the live form and prepare again.');
+    for (const f of d.specFields || []) {
+      const value = d.facts[f.key]; if (!value) continue;
+      const controls = result.snapshot.elements.filter(e => (e.group || e.label) === f.label);
+      if (!controls.some(e => e.type === 'radio' ? e.checked && e.label === value : e.value === value)) throw new WorkflowError('VERIFY', `The live ${f.label} does not match the saved value. Prepare again.`);
+    }
     const validation = await this.decide(decisionSchemas.audit, 'Audit the final live form against the draft. Reject fees, paid promotions or upgrades by returning fieldsMatch=false. For a saved recipe, restore all savedFields including optional/default values exactly; return false if uncertain. Verify selected full category path agrees semantically with the witnessed category and ends at a live selectable leaf with no remaining category children; reject any parent or incomplete category selection; verify price, currency, description, title, supplied facts, photo thumbnails count and cover first. Optional fields the form does not mark as required (for example brand, size or promotion/delivery switches left at their defaults) may stay empty: never fail the audit or ask a question for them, and never ask the owner to supply photos or contact details. Do not trust defaults for factual attributes without source. If any unknown factual defaults, missing facts, mismatches or uncertain upload, fail. Return observed form fields and their source keys for explicit user review. Omit contact/password/account data.', JSON.stringify({ draft: { title: d.title, description: d.description, price: d.price, currency: d.currency, model: d.model, condition: d.condition, location: d.location, facts: itemFacts(d.facts, d.questions), category: d.category, savedFields: d.fields, photoCount: d.photos.length }, page: result.snapshot }));
     if (!validation.categoryMatches) throw new WorkflowError('CATEGORY_UNAVAILABLE', 'The chosen category does not match the live form.');
     if (!validation.categoryMatches || !validation.fieldsMatch || !validation.photosPresent) {

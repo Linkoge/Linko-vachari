@@ -19,7 +19,7 @@ import { aiSchema, automationSchema } from './settings';
 import { myListings } from './listing-summary';
 import { PublishQueue } from './queue';
 import { ListingMonitor } from './listings';
-const patchSchema = z.object({ accountId: z.string().min(1).max(50).optional(), revision: z.number().int(), title: z.string().max(120), description: z.string().max(6000), price: z.string().regex(/^(?:\d{0,8})(?:\.\d{0,2})?$/), currency: z.enum(['GEL', 'USD']), model: z.string().max(200), condition: z.string().max(100), location: z.string().max(200), category: z.array(z.string().max(120)).max(8), facts: z.record(z.string().max(100), z.string().max(500)), photoOrder: z.array(z.string().max(50)).max(8).optional(), coverId: z.string().max(50) });
+const patchSchema = z.object({ estimateMissing: z.boolean().optional(), accountId: z.string().min(1).max(50).optional(), revision: z.number().int(), title: z.string().max(120), description: z.string().max(6000), price: z.string().regex(/^(?:\d{0,8})(?:\.\d{0,2})?$/), currency: z.enum(['GEL', 'USD']), model: z.string().max(200), condition: z.string().max(100), location: z.string().max(200), category: z.array(z.string().max(120)).max(8), facts: z.record(z.string().max(100), z.string().max(500)), photoOrder: z.array(z.string().max(50)).max(8).optional(), coverId: z.string().max(50) });
 export function createApp(store = new Store(), workflow = new Workflow(store), access = new AccessBoundary()) {
   const app = express(); app.disable('x-powered-by');
   const monitor = new ListingMonitor(workflow);
@@ -147,9 +147,11 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     const d = editable(req.params.id); const patch = patchSchema.parse(req.body);
     if (patch.revision !== d.revision) throw new WorkflowError('CONFLICT', 'This draft changed in another tab. Reload before editing it.');
     if (patch.coverId && !d.photos.some(p => p.id === patch.coverId)) throw new WorkflowError('PHOTO', 'Choose a cover from this draft.');
-    if (Object.keys(patch.facts).length > 40) throw new WorkflowError('FACT', 'Keep item details to 40 fields or fewer.');
+    if (Object.keys(patch.facts).length > 80) throw new WorkflowError('FACT', 'Keep item details to 80 fields or fewer.');
     if (patch.accountId) { if (d.relistOf && patch.accountId !== d.accountId) throw new WorkflowError('ACCOUNT', 'A replacement must use the original listing account.'); workflow.accounts.require(patch.accountId); }
     if (JSON.stringify(d.category) !== JSON.stringify(patch.category)) {
+      for (const f of d.specFields || []) { delete d.facts[f.key]; delete patch.facts[f.key]; }
+      d.specFields = []; d.detailSources = {}; d.questions = [];
       d.categoryMethod = d.categoryCandidates?.some(p => JSON.stringify(p) === JSON.stringify(patch.category)) ? d.categoryMethod === 'comparable-search' ? 'comparable-search' : 'tree' : 'owner'; d.categoryCandidates = [];
     }
     if (patch.accountId) workflow.accounts.use(patch.accountId);
@@ -162,8 +164,16 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     for (const q of d.questions) if (accountField(q) === 'location' && patch.facts[q.key] && patch.facts[q.key] !== d.facts[q.key]) values.location = patch.facts[q.key];
     const contact = d.questions.find(q => accountField(q) === 'phone' && patch.facts[q.key]);
     if (contact) values.facts = { ...itemFacts(patch.facts, d.questions), phone: patch.facts[contact.key] };
-    Object.assign(d, values); d.revision++; d.state = d.category.length ? 'review' : 'draft'; delete d.preparedRevision;
-    if (d.questions.length) d.state = 'needs_input';
+    for (const f of d.specFields || []) {
+      const value = values.facts[f.key];
+      if (value && f.options.length && !f.options.includes(value)) throw new WorkflowError('FACT', `Choose a live option for ${f.label}.`);
+      if (value !== d.facts[f.key]) { d.detailSources ||= {}; d.detailSources[f.key] = 'owner'; }
+    }
+    if (patch.estimateMissing !== undefined && patch.estimateMissing !== d.estimateMissing) store.saveEstimateDefault(patch.estimateMissing);
+    if (d.descriptionRewritten && patch.description === d.originalDescription) d.descriptionRewritten = false;
+    if (patch.description !== d.description) d.ownerDescription = patch.description;
+    Object.assign(d, values); if (!d.relistOf) d.fields = []; d.revision++; d.state = d.category.length ? 'review' : 'draft'; delete d.preparedRevision;
+    if (d.questions.some(q => accountField(q) === 'location' ? !d.location.trim() : accountField(q) === 'phone' ? !d.facts.phone && !workflow.accounts.defaults(d.accountId || 'legacy').phone : !d.facts[q.key]?.trim())) d.state = 'needs_input';
     invalidate(d.id); store.save(d); res.json(d);
   });
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024, files: 8, fields: 0, parts: 8 } });
@@ -203,13 +213,14 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   });
   app.post('/api/drafts/:id/:operation', (req, res) => {
     const operation = req.params.operation;
-    if (!['analyze', 'prepare', 'publish'].includes(operation)) return res.status(404).json({ message: 'Unknown action.' });
+    if (!['analyze', 'details', 'prepare', 'publish'].includes(operation)) return res.status(404).json({ message: 'Unknown action.' });
     const d = store.get(req.params.id);
     if (queue.active(d.id)) throw new WorkflowError('LOCKED', 'This draft already has a queued job.');
     workflow.accounts.require(d.accountId || 'legacy');
     if (['published', 'unknown', 'publishing'].includes(d.state)) throw new WorkflowError('LOCKED', 'This item already has a publishing attempt. Check your MyMarket account.');
     if (!d.photos.length || !d.photos.some(p => p.id === d.coverId) || !d.description.trim() || !(Number(d.price) > 0)) throw new WorkflowError('INPUT', 'Add photos, choose a main photo, and provide a description and a price above zero.');
     if (req.body.revision !== d.revision) throw new WorkflowError('CONFLICT', 'Your draft changed. Save the latest details first.');
+    if (operation === 'details' && !d.category.length) throw new WorkflowError('CATEGORY', 'Choose a category first.');
     if (operation === 'publish') {
       if (!workflow.settings.load().automation.publish) throw new WorkflowError('DISABLED', 'Publishing is disabled in Settings.');
       if (!d.title.trim()) throw new WorkflowError('INPUT', 'Add a title.');
@@ -217,8 +228,8 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
       // Persist the next independent draft before responding; the editor can reset in one round trip.
       const nextDraft = newDraft(d.accountId);
       res.status(202).json({ accepted: true, job, nextDraft });
-    } else if (operation === 'analyze') {
-      res.status(202).json({ accepted: true, job: queue.enqueue(d.id, 'analyze') });
+    } else if ((operation === 'analyze' || operation === 'details')) {
+      res.status(202).json({ accepted: true, job: queue.enqueue(d.id, operation) });
     } else {
       if (workflow.busy) throw new WorkflowError('BUSY', 'Wait for the current browser task.');
       void workflow.run(d.id, 'prepare'); res.status(202).json({ accepted: true });

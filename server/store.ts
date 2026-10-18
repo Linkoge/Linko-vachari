@@ -13,6 +13,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS listing_records(id TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, draft TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, createdAt INTEGER NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS active_draft_job ON jobs(draft) WHERE status IN ('queued','running');
+      CREATE TABLE IF NOT EXISTS preferences(id TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS learned_steps(id TEXT PRIMARY KEY, data TEXT NOT NULL);`);
   }
   learned(id: string): import('./replay').SavedStep[] {
@@ -20,8 +21,10 @@ export class Store {
     return row ? JSON.parse(row.data) : [];
   }
   learn(id: string, steps: import('./replay').SavedStep[]) { this.db.prepare('INSERT OR REPLACE INTO learned_steps VALUES (?,?)').run(id, JSON.stringify(steps)); }
+  estimateDefault() { return this.db.prepare("SELECT value FROM preferences WHERE id='estimateMissing'").get()?.value === 'true'; }
+  saveEstimateDefault(value: boolean) { this.db.prepare("INSERT OR REPLACE INTO preferences VALUES ('estimateMissing',?)").run(String(value)); }
   create(accountId?: string) {
-    const d: Draft = { accountId, id: randomUUID(), revision: 0, state: 'draft', title: '', description: '', price: '', currency: 'GEL', model: '', condition: '', location: '', facts: {}, photos: [], coverId: '', category: [], comparables: [], questions: [], fields: [], message: '', events: [] };
+    const d: Draft = { estimateMissing: this.estimateDefault(), accountId, id: randomUUID(), revision: 0, state: 'draft', title: '', description: '', price: '', currency: 'GEL', model: '', condition: '', location: '', facts: {}, photos: [], coverId: '', category: [], comparables: [], questions: [], fields: [], message: '', events: [] };
     this.save(d); return d;
   }
   get(id: string): Draft {

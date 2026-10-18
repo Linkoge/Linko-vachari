@@ -2,6 +2,8 @@ import { z } from 'zod';
 const question = z.object({ key: z.string(), label: z.string(), options: z.array(z.string()) });
 // Every model decision lives here, so compatibility checks cover the complete set.
 export const decisionSchemas = {
+  descriptionCheck: z.object({ sameLanguage: z.boolean(), factsSupported: z.boolean() }),
+  details: z.object({ description: z.string().max(6000), answers: z.array(z.object({ key: z.string().max(100), value: z.string().max(500), source: z.enum(['owner', 'lookup']), evidence: z.string(), url: z.string() })).max(80) }),
   action: z.object({ action: z.enum(['click', 'fill', 'select', 'search_enter', 'upload', 'wait', 'done', 'blocked', 'category_unavailable']), target: z.string(), source: z.string(), value: z.string(), questions: z.array(question), reason: z.string() }),
   answers: z.object({ answers: z.array(z.object({ key: z.string().max(100), value: z.string().max(500), evidence: z.string() })) }),
   equivalent: z.object({ equivalent: z.boolean() }),
@@ -16,6 +18,10 @@ export const decisionSchemas = {
   deletion: z.object({ confident: z.boolean(), target: z.string(), action: z.enum(['navigate', 'delete', 'confirm', 'uncertain']) }),
   login: z.object({ kind: z.enum(['code', 'rejected', 'waiting', 'other']), inputTarget: z.string(), submitTarget: z.string() }),
 };
+// Requiring every offered spec in the estimate response prevents model abstention.
+export function estimateSchema(fields: import('./types').SpecField[]) {
+  return z.object({ values: z.object(Object.fromEntries(fields.map(f => [f.key, f.options.length ? z.enum(f.options as [string, ...string[]]) : f.inputType === 'number' ? z.string().regex(/^-?\d+(?:\.\d+)?$/).max(500) : z.string().trim().min(1).max(500)]))) });
+}
 // Use the shared strict subset for both CLIs. Bounds remain enforced by Zod after
 // parsing; removing them on the wire supports providers with smaller subsets.
 export function decisionJSONSchema(schema: z.ZodType): Record<string, any> {

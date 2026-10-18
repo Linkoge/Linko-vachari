@@ -11,7 +11,7 @@ import { ask, claudeResult } from '../server/codex';
 import { config } from '../server/config';
 import { SettingsStore } from '../server/settings';
 import { AIFailure, classifyAIError, cliErrorDetail, redactAIDetail } from '../server/ai-errors';
-import { decisionJSONSchema, decisionSchemas } from '../server/decision-schemas';
+import { decisionJSONSchema, decisionSchemas, estimateSchema } from '../server/decision-schemas';
 import { registerSecret, unregisterSecret } from '../server/secrets';
 import { codexModels, providerModels, validateModelChanges } from '../server/ai-models';
 import { CategoryTree } from '../server/categories';
@@ -29,8 +29,9 @@ function strictSchema(node: any) {
   if (node.$defs) Object.values(node.$defs).forEach(strictSchema);
 }
 test('every production decision uses the registry and compiles into the shared strict schema subset', async () => {
-  assert.equal(Object.keys(decisionSchemas).length, 13);
+  assert.equal(Object.keys(decisionSchemas).length, 15);
   for (const schema of Object.values(decisionSchemas)) strictSchema(decisionJSONSchema(schema));
+  strictSchema(decisionJSONSchema(estimateSchema([{ key: 'Size', label: 'Size', options: ['Small', 'Large'], required: true, kind: 'spec' }])));
   // Catch new inline decision schemas that would silently escape this suite.
   for (const file of ['workflow', 'agent', 'deletion']) {
     const text = await readFile(`server/${file}.ts`, 'utf8');

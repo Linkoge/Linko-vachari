@@ -40,6 +40,7 @@ test('connected semantic workflow: comparables, new live required field, review,
   const brain: typeof ask = (async (_schema: unknown, instructions: string, input: string, slot = 'everyday') => {
     aiSlots.push(slot);
     const v = JSON.parse(input);
+    if (instructions.startsWith('Look up product')) return { description: '', answers: [] };
     if (instructions.startsWith('Suggest')) return { title: 'Studio lamp with stand', query: 'Studio lamp', queries: ['Studio lamp', 'Photography lighting', 'Lamp with stand'] };
     if (instructions.startsWith('Choose one')) return { urls: v.links.map((e: any) => e.href).filter((url: string) => url.includes('/pr/')) };
     if (instructions.startsWith('Inspect this')) return { relevant: true, title: 'Studio lamp', breadcrumbs: ['Home', 'Lighting', 'Studio lamps'] };
@@ -58,6 +59,7 @@ test('connected semantic workflow: comparables, new live required field, review,
     }
     if (v.page.url.endsWith('/')) return decision('click', 'Add listing');
     const category = elements.find(e => e.label === 'Category'); if (!category.value) return decision('select', 'Category', 'category', 'Studio lamps');
+    if (v.task.startsWith('Read the live category form')) return decision('done');
     for (const [label, source] of [['Title', 'title'], [changed ? 'Item description' : 'Description', 'description'], ['Price', 'price']]) if (!elements.find(e => e.label === label)?.value) return decision('fill', label, source, v.draft[source]);
     if (!v.draft.facts['Power source']) return { ...decision('blocked'), questions: [{ key: 'Power source', label: 'Power source', options: ['Mains', 'Battery'] }] };
     if (!elements.find(e => e.label === 'Power source')?.value) return decision('select', 'Power source', 'facts.Power source', v.draft.facts['Power source']);
@@ -69,7 +71,7 @@ test('connected semantic workflow: comparables, new live required field, review,
   Object.assign(draft, { description: 'A used studio lamp with original stand.', price: '125', photos, coverId: photos[1].id }); store.save(draft);
   const previous = config.publish, previousRelist = config.autoRelist; config.publish = true;
   try {
-    await flow.run(draft.id, 'analyze'); const analyzed = store.get(draft.id); assert.equal(analyzed.state, 'review', analyzed.message); assert.equal(analyzed.coverId, photos[1].id); assert.equal(analyzed.comparables.length, 2); assert.deepEqual(analyzed.category, ['Home', 'Lighting', 'Studio lamps']);
+    await flow.run(draft.id, 'analyze'); const analyzed = store.get(draft.id); assert.equal(analyzed.state, 'needs_input', analyzed.message); assert.equal(analyzed.specFields?.[0].label, 'Power source'); assert.equal(analyzed.coverId, photos[1].id); assert.equal(analyzed.comparables.length, 2); assert.deepEqual(analyzed.category, ['Home', 'Lighting', 'Studio lamps']);
     await flow.run(draft.id, 'prepare'); const needs = store.get(draft.id); assert.equal(needs.state, 'needs_input', needs.message); assert.equal(needs.questions[0].key, 'Power source'); assert.equal(submits, 0);
     needs.facts['Power source'] = 'Mains'; needs.revision++; store.save(needs);
     await flow.run(draft.id, 'prepare'); const ready = store.get(draft.id); assert.equal(ready.state, 'ready', ready.message); assert.ok(ready.fields.some(f => f.value === 'Mains')); assert.equal(submits, 0);
