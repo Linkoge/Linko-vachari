@@ -95,8 +95,10 @@ test('account API chooses last-used by default, keeps credentials write-only and
     assert.equal(response.status, 200); assert.ok(!raw.includes(first.password) && !raw.includes(second.password) && !raw.includes(second.identifier));
     const accounts = JSON.parse(raw).accounts, id = accounts[1].id;
     assert.equal((await (await call('/drafts', 'POST', {})).json()).accountId, id);
-    const candidateDraft = f.store.create(id); candidateDraft.categoryCandidates = categories.map(c => c.path); f.store.save(candidateDraft);
-    assert.equal((await call('/drafts/' + candidateDraft.id, 'PATCH', { ...candidateDraft, category: ['Invented'] })).status, 409);
+    let candidateDraft = f.store.create(id); candidateDraft.categoryCandidates = categories.map(c => c.path); f.store.save(candidateDraft);
+    const manual = await call('/drafts/' + candidateDraft.id, 'PATCH', { ...candidateDraft, category: ['Owner correction'] });
+    assert.equal(manual.status, 200); assert.equal((await manual.json()).categoryMethod, 'owner');
+    candidateDraft = f.store.get(candidateDraft.id); candidateDraft.categoryCandidates = categories.map(c => c.path); f.store.save(candidateDraft);
     assert.equal((await call('/drafts/' + candidateDraft.id, 'PATCH', { ...candidateDraft, accountId: '' })).status, 400);
     const picked = await call('/drafts/' + candidateDraft.id, 'PATCH', { ...candidateDraft, category: categories[0].path });
     assert.equal(picked.status, 200); assert.equal((await picked.json()).categoryMethod, 'tree');

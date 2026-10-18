@@ -22,7 +22,7 @@ test('Settings saves several accounts privately and draft account choice persist
   await page.getByRole('button', { name: 'New draft' }).click();
   await expect(page.getByLabel('Listing account')).toHaveValue(list.find((a: any) => a.label === 'Shop').id);
   await page.getByLabel('Listing account').selectOption(list.find((a: any) => a.label === 'Personal').id);
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('.lean-publish span')).toHaveText('Saved');
   await page.getByRole('button', { name: 'New draft' }).click();
   await expect(page.getByLabel('Listing account')).toHaveValue(list.find((a: any) => a.label === 'Personal').id);
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
@@ -34,7 +34,7 @@ test('Settings saves several accounts privately and draft account choice persist
 
 test('uncertain tree results present three paths and preserve the owner choice', async ({ page }) => {
   let draft: any, candidates: any;
-  await page.route('**/api/drafts', async r => { const response = await r.fetch(); draft = await response.json(); await r.fulfill({ response, json: draft }); });
+  await page.route('**/api/drafts', async r => { const response = await r.fetch(); const json = await response.json(); if (r.request().method() === 'POST') draft = json; await r.fulfill({ response, json }); });
   await page.route('**/api/drafts/*', r => {
     if (r.request().method() === 'GET' && candidates) return r.fulfill({ json: candidates });
     return r.continue();
@@ -48,14 +48,13 @@ test('uncertain tree results present three paths and preserve the owner choice',
   await expect(page.locator('input[type=file]')).toBeEnabled();
   await page.locator('input[type=file]').setInputFiles('public/icons/icon-192.png');
   await expect(page.getByAltText('Item photo 1')).toBeVisible();
-  await page.getByRole('button', { name: 'Add item details' }).click();
   await page.getByLabel('Asking price').fill('25'); await page.getByLabel('Description', { exact: false }).fill('Studio lamp with stand');
-  await page.getByRole('button', { name: 'Find my category' }).click();
+  await page.getByRole('button', { name: 'Find category' }).click();
   const choices = page.getByRole('group', { name: 'Choose a category' });
   await expect(choices.getByRole('button')).toHaveCount(3);
-  await expect(page.getByRole('button', { name: 'Check live listing form' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Publish', exact: true })).toBeDisabled();
   await choices.getByRole('button', { name: 'Lighting › Studio lamps' }).click();
   await expect(page.getByLabel('Category path')).toHaveValue('Lighting > Studio lamps');
-  await page.getByRole('button', { name: 'Save', exact: true }).click(); candidates = undefined;
+  await expect(page.locator('.lean-publish span')).toHaveText('Saved'); candidates = undefined;
   const saved = await (await page.request.get('/api/drafts/' + draft.id)).json(); expect(saved.category).toEqual(['Lighting', 'Studio lamps']);
 });

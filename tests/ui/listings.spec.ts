@@ -20,7 +20,6 @@ test('saved listings expose records, pause/resume and the original draft', async
   await page.getByText('Saved listings · 1', { exact: true }).click();
   const records = page.getByRole('region', { name: 'Saved listings' });
   await expect(records.getByRole('heading', { name: 'Saved studio lamp' })).toBeVisible();
-  await expect(records.getByText(/Pause monitoring before selling/)).toBeVisible();
   await expect(records.getByRole('link', { name: 'Download Markdown record' })).toHaveAttribute('href', `/api/listings/${draft.id}/record`);
   await records.getByRole('button', { name: 'Pause monitoring' }).click();
   await expect(records.getByRole('button', { name: 'Resume monitoring' })).toBeVisible();

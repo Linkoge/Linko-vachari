@@ -1,4 +1,4 @@
-export type State = 'draft' | 'analyzing' | 'needs_input' | 'review' | 'preparing' | 'ready' | 'publishing' | 'published' | 'unknown' | 'blocked';
+export type State = 'draft' | 'queued' | 'analyzing' | 'needs_input' | 'review' | 'preparing' | 'ready' | 'publishing' | 'published' | 'unknown' | 'blocked';
 export interface Photo { id: string; width: number; height: number }
 export interface Comparable { url: string; title: string; breadcrumbs: string[] }
 export interface Question { key: string; label: string; options: string[] }

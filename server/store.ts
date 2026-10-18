@@ -11,6 +11,8 @@ export class Store {
     this.db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS attempts(fingerprint TEXT PRIMARY KEY, draft TEXT NOT NULL, state TEXT NOT NULL, receipt TEXT);
       CREATE TABLE IF NOT EXISTS listing_records(id TEXT PRIMARY KEY, data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, draft TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL, createdAt INTEGER NOT NULL);
+      CREATE UNIQUE INDEX IF NOT EXISTS active_draft_job ON jobs(draft) WHERE status IN ('queued','running');
       CREATE TABLE IF NOT EXISTS learned_steps(id TEXT PRIMARY KEY, data TEXT NOT NULL);`);
   }
   learned(id: string): import('./replay').SavedStep[] {
@@ -19,7 +21,7 @@ export class Store {
   }
   learn(id: string, steps: import('./replay').SavedStep[]) { this.db.prepare('INSERT OR REPLACE INTO learned_steps VALUES (?,?)').run(id, JSON.stringify(steps)); }
   create(accountId?: string) {
-    const d: Draft = { accountId, id: randomUUID(), revision: 0, state: 'draft', title: '', description: '', price: '', currency: 'GEL', model: '', condition: '', location: '', facts: {}, photos: [], coverId: '', category: [], comparables: [], questions: [], fields: [], message: 'Add your photos and a few details to begin.', events: [] };
+    const d: Draft = { accountId, id: randomUUID(), revision: 0, state: 'draft', title: '', description: '', price: '', currency: 'GEL', model: '', condition: '', location: '', facts: {}, photos: [], coverId: '', category: [], comparables: [], questions: [], fields: [], message: '', events: [] };
     this.save(d); return d;
   }
   get(id: string): Draft {
@@ -30,6 +32,10 @@ export class Store {
     return d;
   }
   save(d: Draft) { this.db.prepare('INSERT OR REPLACE INTO drafts VALUES (?,?)').run(d.id, JSON.stringify(d)); }
+  all(): Draft[] {
+    return (this.db.prepare('SELECT id FROM drafts ORDER BY rowid DESC').all() as { id: string }[]).map(r => this.get(r.id));
+  }
+  delete(id: string) { this.db.prepare('DELETE FROM drafts WHERE id=?').run(id); }
   photoReferenced(id: string) {
     const drafts = this.db.prepare('SELECT data FROM drafts').all() as { data: string }[];
     const records = this.db.prepare('SELECT data FROM listing_records').all() as { data: string }[];

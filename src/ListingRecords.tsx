@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { ListingRecord } from '../server/listings';
 
+type JobSummary = { id: string; draft: string; title: string; status: string; state: string; message: string };
 type RecordSummary = Omit<ListingRecord, 'recipe'> & { title: string };
-export function ListingRecords({ online, onOpenDraft, disabled }: { online: boolean; onOpenDraft: (id: string) => Promise<void>; disabled: boolean }) {
-  const [data, setData] = useState<{ autoRelistEnabled: boolean; records: RecordSummary[] }>();
+export function ListingRecords({ online, onOpenDraft, disabled, refreshKey = 0 }: { online: boolean; onOpenDraft: (id: string) => Promise<void>; disabled: boolean; refreshKey?: number }) {
+  const [data, setData] = useState<{ autoRelistEnabled: boolean; records: RecordSummary[]; jobs?: JobSummary[] }>();
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState<string>();
   const [pending, setPending] = useState(false);
@@ -15,9 +16,9 @@ export function ListingRecords({ online, onOpenDraft, disabled }: { online: bool
   useEffect(() => {
     if (!online) return;
     void refresh().catch(() => {});
-    const timer = setInterval(() => { void refresh().catch(() => {}); }, 30_000);
+    const timer = setInterval(() => { void refresh().catch(() => {}); }, 1500);
     return () => clearInterval(timer);
-  }, [online]);
+  }, [online, refreshKey]);
   async function change(id: string, enabled: boolean) {
     setError('');
     try {
@@ -36,9 +37,9 @@ export function ListingRecords({ online, onOpenDraft, disabled }: { online: bool
   }
   if (!data) return null;
   return <section className="panel listing-records" aria-label="Saved listings">
+    {!!data.jobs?.length && <div className="publish-jobs" aria-label="Publish jobs"><h2>Publish jobs</h2>{data.jobs.map(j => <article key={j.id}><h3>{j.title || 'Untitled'}</h3><p>{j.status === 'running' ? j.state : j.status} · {j.message}</p>{['failed', 'needs_input'].includes(j.status) && <button className="text-button" disabled={!online || disabled} onClick={() => void onOpenDraft(j.draft)}>Open draft</button>}</article>)}</div>}
     <details><summary>Saved listings · {data.records.length}</summary>
-      {!data.records.length && <p>No saved listings yet. Verified published listings and their history will appear here.</p>}
-      <p>Checks run every three hours while the server is running. Automatic re-listing is {data.autoRelistEnabled ? 'enabled' : 'disabled in server configuration'}. Pause monitoring before selling an item. Delete listings only through this app so they are permanently excluded from re-listing.</p>
+      {!data.records.length && <p>No saved listings yet.</p>}
       {error && <p role="alert">{error}</p>}
       {data.records.map(r => <article key={r.id}>
         <h3>{r.title}</h3><p>{r.deleteRequestedAt ? r.status : r.enabled ? r.status : 'Paused'} · {r.message}</p>

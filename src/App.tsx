@@ -4,179 +4,192 @@ import { readCache, writeCache, clearCache } from './cache';
 import { AgentWindow } from './AgentWindow';
 import { Settings } from './Settings';
 import { ListingRecords } from './ListingRecords';
-type IconName = 'spark' | 'plus' | 'photo' | 'arrow' | 'check' | 'shield' | 'download' | 'close' | 'grid' | 'gear' | 'link' | 'leaf';
-function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
-  const paths: Record<IconName, React.ReactNode> = {
-    spark: <><path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6L12 3Z"/><path d="m20 2 .8 2.2L23 5l-2.2.8L20 8l-.8-2.2L17 5l2.2-.8Z"/></>,
-    plus: <path d="M12 5v14M5 12h14"/>, photo: <><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="9" r="1.4"/><path d="m4 18 5-5 3 3 4-6 5 7"/></>,
-    arrow: <path d="M4 12h16m-6-6 6 6-6 6"/>, check: <path d="m5 12 4 4L19 6"/>, shield: <><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></>,
-    download: <><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></>, close: <path d="m6 6 12 12M6 18 18 6"/>, grid: <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
-    gear: <><circle cx="12" cy="12" r="4"/><path d="m10 2-1 3-3 1-3 4 2 2-1 4 4 3 3-1 3 1 4-3-1-4 2-2-3-4-3-1-1-3Z"/></>, link: <><path d="m9 15 6-6m-7 4-2 2a4 4 0 0 0 6 6l3-3m1-7 2-2a4 4 0 0 0-6-6l-3 3"/></>, leaf: <><path d="M20 3C9 1 2 7 5 15s15 6 15-12Z"/><path d="M4 21 16 8"/></>
-  };
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
-}
-async function api<T>(path: string, body?: unknown, method = 'GET'): Promise<T> {
-  const response = await fetch('/api' + path, { method, headers: { 'X-Linko-Request': '1', ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body) });
+
+async function api<T>(path: string, body?: unknown, method = 'GET', revision?: number): Promise<T> {
+  const response = await fetch('/api' + path, { method, headers: { 'X-Linko-Request': '1', ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(revision === undefined ? {} : { 'If-Match': String(revision) }) }, body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body) });
   if (response.status === 401) window.dispatchEvent(new Event('linko-signed-out'));
   const data = await response.json(); if (!response.ok) throw new Error(data.message || 'This action could not be completed.'); return data;
 }
+const running = (d?: Draft) => !!d && ['queued', 'analyzing', 'preparing', 'publishing'].includes(d.state);
+const locked = (d?: Draft) => running(d) || ['published', 'unknown'].includes(d?.state || '');
 export function App() {
-  const [draft, setDraft] = useState<Draft>(); const [dirty, setDirty] = useState(false); const [working, setWorking] = useState(false);
-  const [online, setOnline] = useState(navigator.onLine); const [error, setError] = useState(''); const [step, setStep] = useState(1);
-  const [settings, setSettings] = useState(false); const [confirm, setConfirm] = useState(false); const [install, setInstall] = useState<any>();
+  const [draft, setDraft] = useState<Draft>(); const current = useRef<Draft | undefined>(undefined);
+  const [dirty, setDirty] = useState(false), dirtyRef = useRef(false), version = useRef(0);
+  const saving = useRef<Promise<Draft> | undefined>(undefined);
+  const [working, setWorking] = useState(false), [saveFailed, setSaveFailed] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine), [error, setError] = useState('');
+  const [settings, setSettings] = useState(false), [drafts, setDrafts] = useState<Draft[]>([]);
   const [accounts, setAccounts] = useState<{ id: string; label: string; activeListings: number }[]>([]);
-  const loadAccounts = () => api<{ accounts: typeof accounts }>('/accounts').then(d => setAccounts(d.accounts));
+  const [cfg, setCfg] = useState<{ publishEnabled: boolean; mode: string }>();
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [categoryText, setCategoryText] = useState('');
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const blobs = useRef<{ id: string; blob: Blob }[]>([]), input = useRef<HTMLInputElement>(null);
+  function show(d: Draft, pending = false, syncCategory = true) {
+    if (syncCategory) setCategoryText(d.category.join(' > '));
+    current.current = d; dirtyRef.current = pending; setDraft(d); setDirty(pending);
+    sessionStorage.setItem('linko-draft', d.id);
+  }
+  async function refresh() {
+    const [a, d] = await Promise.all([api<{ accounts: typeof accounts }>('/accounts'), api<{ drafts: Draft[] }>('/drafts')]);
+    setAccounts(a.accounts); setDrafts(d.drafts);
+  }
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener('online', update); window.addEventListener('offline', update);
+    void (async () => {
+      // A newly opened/duplicated tab may inherit sessionStorage from its opener.
+      // Reloads resume that tab's draft; fresh navigation starts an independent one.
+      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+      if (navigator.onLine && navigation?.type === 'navigate') sessionStorage.removeItem('linko-draft');
+      const activeId = sessionStorage.getItem('linko-draft');
+      const cached = activeId ? await readCache(activeId).catch(() => undefined) : undefined;
+      if (cached) {
+        blobs.current = cached.photos;
+        if (!navigator.onLine || cached.pending) show(cached.draft, cached.pending);
+        setPreviews(Object.fromEntries(cached.photos.map(p => [p.id, URL.createObjectURL(p.blob)])));
+      }
+      if (!navigator.onLine) return;
+      try {
+        if (!cached?.pending) {
+          const id = sessionStorage.getItem('linko-draft');
+          let d: Draft | undefined;
+          if (id) { try { d = await api<Draft>('/drafts/' + id); } catch {} }
+          show(d || await api<Draft>('/drafts', {}, 'POST'));
+        }
+      } catch (e) { setError((e as Error).message); }
+    })();
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
   useEffect(() => {
     if (!online) return;
-    void loadAccounts().catch(() => {});
-    const timer = setInterval(() => { void loadAccounts().catch(() => {}); }, 30_000);
+    void api<NonNullable<typeof cfg>>('/config').then(setCfg).catch(() => {});
+    void refresh().catch(() => {});
+    const timer = setInterval(() => { void refresh().catch(() => {}); }, 3000);
     return () => clearInterval(timer);
-  }, [online, settings, draft?.state]);
-  const [cfg, setCfg] = useState<{ everyday?: { signedIn: boolean }; codex: { available: boolean; chatgptSignedIn: boolean }; publishEnabled: boolean; mode: string; publicOrigin: string }>();
-  const [previews, setPreviews] = useState<Record<string, string>>({}); const cachedPhotos = useRef<{ id: string; blob: Blob }[]>([]);
-  const input = useRef<HTMLInputElement>(null); const draftRef = useRef(draft); draftRef.current = draft;
-  const running = !!draft && ['analyzing', 'preparing', 'publishing'].includes(draft.state);
-  const locked = running || ['published', 'unknown'].includes(draft?.state || '');
-  useEffect(() => () => { draftRef.current = undefined; Object.values(previews).forEach(url => URL.revokeObjectURL(url)); }, []);
+  }, [online, settings, refreshKey]);
   useEffect(() => {
-    if (!settings && !confirm) return;
+    if (!draft) return;
+    const id = draft.id;
+    void writeCache({ draft, pending: dirty, photos: blobs.current.filter(p => draft.photos.some(v => v.id === p.id)) }).catch(() => setError('Device storage is full. Keep this page open until autosave completes.'));
+    if (online) for (const p of draft.photos) if (!blobs.current.some(b => b.id === p.id)) {
+      void fetch(`/api/drafts/${id}/photos/${p.id}`).then(r => { if (!r.ok) throw new Error(); return r.blob(); }).then(blob => {
+        if (current.current?.id !== id || blobs.current.some(b => b.id === p.id)) return;
+        blobs.current.push({ id: p.id, blob }); setPreviews(v => ({ ...v, [p.id]: URL.createObjectURL(blob) }));
+        void writeCache({ draft: current.current, pending: dirtyRef.current, photos: blobs.current });
+      }).catch(() => {});
+    }
+  }, [draft, dirty, online]);
+  useEffect(() => {
+    if (!online || !running(draft)) return;
+    const id = draft!.id;
+    const timer = setInterval(() => { void api<Draft>('/drafts/' + id).then(d => { if (current.current?.id === id) show(d); }).catch(e => setError(e.message)); }, 900);
+    return () => clearInterval(timer);
+  }, [online, draft?.id, draft?.state]);
+  useEffect(() => {
+    if (!dirty || !online || working || saveFailed || locked(draft)) return;
+    const timer = setTimeout(() => { void save().catch(e => { setError(e.message); setSaveFailed(true); }); }, 500);
+    return () => clearTimeout(timer);
+  }, [draft, dirty, online, working, saveFailed]);
+  useEffect(() => {
+    if (!settings) return;
     const prior = document.activeElement as HTMLElement | null;
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const dialog = document.querySelector<HTMLElement>('[role=dialog]');
     dialog?.querySelector<HTMLElement>('button')?.focus();
-    const keyboard = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setSettings(false); setConfirm(false); }
+    const keys = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSettings(false);
       if (e.key !== 'Tab' || !dialog) return;
       const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input,select,textarea')).filter(el => el.getClientRects().length);
       const first = controls[0], last = controls.at(-1);
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
     };
-    document.addEventListener('keydown', keyboard);
-    return () => { document.removeEventListener('keydown', keyboard); prior?.focus(); };
-  }, [settings, confirm]);
-  useEffect(() => {
-    if (online) void api<{ everyday?: { signedIn: boolean }; codex: { available: boolean; chatgptSignedIn: boolean }; publishEnabled: boolean; mode: string; publicOrigin: string }>('/config').then(setCfg).catch(() => {});
-  }, [online]);
-  useEffect(() => {
-    const update = () => setOnline(navigator.onLine); window.addEventListener('online', update); window.addEventListener('offline', update);
-    const onInstall = (e: Event) => { e.preventDefault(); setInstall(e); }; window.addEventListener('beforeinstallprompt', onInstall);
-    void (async () => {
-      const cached = await readCache().catch(() => undefined);
-      if (cached) { cachedPhotos.current = cached.photos; setDraft(cached.draft); setDirty(cached.pending); setPreviews(Object.fromEntries(cached.photos.map(p => [p.id, URL.createObjectURL(p.blob)]))); }
-      if (!navigator.onLine) return;
-      try {
-        setCfg(await api('/config'));
-        if (cached?.pending) { setError('You have locally saved edits. Save them to the workspace before continuing.'); return; }
-        const next = cached ? await api<Draft>('/drafts/' + cached.draft.id) : await api<Draft>('/drafts', {}, 'POST'); setDraft(next);
-      } catch (e) { setError(e instanceof Error ? e.message : 'Start the local Linko server to connect your workspace.'); }
-    })();
-    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); window.removeEventListener('beforeinstallprompt', onInstall); };
-  }, []);
-  useEffect(() => {
-    if (!draft) return;
-    void writeCache({ draft, pending: dirty, photos: cachedPhotos.current.filter(p => draft.photos.some(v => v.id === p.id)) }).catch(() => setError('Device storage is full. Keep this page open and save to the workspace.'));
-    if (online) for (const p of draft.photos) if (!cachedPhotos.current.some(v => v.id === p.id)) {
-      void fetch(`/api/drafts/${draft.id}/photos/${p.id}`).then(r => { if (!r.ok) throw new Error('photo'); return r.blob(); }).then(blob => {
-        if (cachedPhotos.current.some(v => v.id === p.id)) return;
-        cachedPhotos.current.push({ id: p.id, blob }); setPreviews(v => ({ ...v, [p.id]: URL.createObjectURL(blob) }));
-        const latest = draftRef.current; if (latest) void writeCache({ draft: latest, pending: dirty, photos: cachedPhotos.current });
-      }).catch(() => {});
-    }
-  }, [draft, dirty, online]);
-  useEffect(() => {
-    if (!running || !draft) return;
-    const timer = setInterval(() => { void api<Draft>('/drafts/' + draft.id).then(next => { setDraft(next); if (!['analyzing', 'preparing', 'publishing'].includes(next.state)) setStep(3); }).catch(() => setError('Connection interrupted. Reconnect to check this operation; do not repeat a publish request.')); }, 1400);
-    return () => clearInterval(timer);
-  }, [running, draft?.id]);
-  function edit(key: keyof Draft, value: unknown) { if (locked) return; setDraft(d => d ? { ...d, [key]: value } : d); setDirty(true); }
-  async function save(): Promise<Draft> {
-    if (!draft) throw new Error('Connect to the local workspace to create a draft.');
-    if (!online) { await writeCache({ draft, pending: true, photos: cachedPhotos.current }); setError('Saved on this device. Reconnect and save to the workspace before listing.'); return draft; }
-    if (!dirty) return draft;
-    const { accountId, revision, title, description, price, currency, model, condition, location, category, facts, coverId } = draft;
-    const next = await api<Draft>('/drafts/' + draft.id, { accountId, revision, title, description, price, currency, model, condition, location, category, facts, coverId }, 'PATCH');
-    setDraft(next); setDirty(false); return next;
+    document.addEventListener('keydown', keys);
+    return () => { document.removeEventListener('keydown', keys); prior?.focus(); };
+  }, [settings]);
+  function edit(key: keyof Draft, value: unknown) {
+    if (!current.current || locked(current.current)) return;
+    version.current++; show({ ...current.current, [key]: value }, true, key === 'category'); setSaveFailed(false);
   }
-  async function action(op: 'analyze' | 'prepare' | 'publish') {
-    setError(''); setWorking(true);
+  async function save(): Promise<Draft> {
+    if (saving.current) { await saving.current; return dirtyRef.current ? save() : current.current!; }
+    const d = current.current; if (!d) throw new Error('Connect to create a draft.');
+    if (!online || !dirtyRef.current) return d;
+    const v = version.current;
+    const { accountId, revision, title, description, price, currency, model, condition, location, category, facts, coverId } = d;
+    const task = api<Draft>('/drafts/' + d.id, { accountId, revision, title, description, price, currency, model, condition, location, category, facts, coverId, photoOrder: d.photos.map(p => p.id) }, 'PATCH');
+    saving.current = task;
     try {
-      const next = op === 'publish' ? draft! : await save();
-      await api(`/drafts/${next.id}/${op}`, { revision: next.revision, confirm: op === 'publish', preparedAt: next.preparedAt }, 'POST');
-      setDraft({ ...next, state: op === 'analyze' ? 'analyzing' : op === 'prepare' ? 'preparing' : 'publishing', message: op === 'publish' ? 'Submitting once to MyMarket…' : 'Connecting to the marketplace…' }); setStep(3); setConfirm(false);
-    } catch (e) { setError((e as Error).message); } finally { setWorking(false); }
+      const next = await task;
+      if (current.current?.id === d.id) {
+        if (v === version.current) show(next, false, false);
+        else show({ ...current.current, revision: next.revision }, true, false);
+      }
+      return next;
+    } finally { saving.current = undefined; }
+  }
+  async function perform(fn: () => Promise<void>) {
+    setWorking(true); setError('');
+    try { await fn(); setRefreshKey(v => v + 1); } catch (e) { setError((e as Error).message); }
+    finally { setWorking(false); }
+  }
+  function reset(d: Draft) {
+    Object.values(previews).forEach(url => URL.revokeObjectURL(url)); blobs.current = []; setPreviews({}); show(d); setSaveFailed(false);
+  }
+  async function open(id?: string) {
+    await perform(async () => { if (!locked(current.current)) await save(); reset(await api<Draft>(id ? '/drafts/' + id : '/drafts', id ? undefined : {}, id ? 'GET' : 'POST')); });
   }
   async function photos(files: FileList | null) {
-    if (!files?.length || !draft) return; setError(''); setWorking(true);
-    try {
-      if (!online) throw new Error('Photo uploads need a connection to your local workspace. Your existing photos and text stay available offline.');
-      if (draft.photos.length + files.length > 8) throw new Error('Choose up to eight photos in total.');
-      if (Array.from(files).some(f => !['image/jpeg', 'image/png', 'image/webp'].includes(f.type) || f.size > 12 * 1024 * 1024)) throw new Error('Choose JPEG, PNG or WebP photos under 12 MB each.');
-      const d = await save(); const form = new FormData(); Array.from(files).forEach(f => form.append('photos', f));
-      setDraft(await api<Draft>(`/drafts/${d.id}/photos`, form, 'POST'));
-    } catch (e) { setError((e as Error).message); } finally { setWorking(false); if (input.current) input.current.value = ''; }
+    if (!files?.length) return;
+    await perform(async () => {
+      const d = await save();
+      const form = new FormData(); Array.from(files).forEach(f => form.append('photos', f));
+      show(await api<Draft>(`/drafts/${d.id}/photos`, form, 'POST', d.revision));
+    });
+    if (input.current) input.current.value = '';
   }
-  async function remove(id: string) {
-    setWorking(true); setError(''); try { const d = await save(); setDraft(await api<Draft>(`/drafts/${d.id}/photos/${id}`, undefined, 'DELETE')); } catch (e) { setError((e as Error).message); } finally { setWorking(false); }
+  async function action(op: 'analyze' | 'publish') {
+    await perform(async () => {
+      const d = await save();
+      const result = await api<{ nextDraft?: Draft }>(`/drafts/${d.id}/${op}`, { revision: d.revision }, 'POST');
+      if (result.nextDraft) reset(result.nextDraft);
+      else show({ ...d, state: 'queued', message: 'Finding category…' });
+    });
   }
-  async function newDraft() { setWorking(true); try { if (dirty && !locked) await save(); setDraft(await api<Draft>('/drafts', {}, 'POST')); setDirty(false); setStep(1); setError(''); cachedPhotos.current = []; } catch (e) { setError((e as Error).message); } finally { setWorking(false); } }
-  const imageUrl = (id: string) => previews[id] || `/api/drafts/${draft?.id}/photos/${id}`;
-  const hasBasics = !!draft?.photos.length && !!draft.description.trim() && Number(draft.price) > 0;
-  return <div className="app-layout">
-    <aside className="sidebar">
-      <a className="brand" href="/" aria-label="Linko home"><img src="/icons/icon-192.png" alt=""/><span>linko<span className="brand-dot">.</span><small>MYMARKETER</small></span></a>
-      <div className="workspace-label">YOUR WORKSPACE</div>
-      <button className="nav-item active" onClick={() => setStep(1)}><Icon name="grid"/> Create a listing <span className="nav-dot"/></button>
-      <button className="nav-item" onClick={() => setSettings(true)}><Icon name="gear"/> Connection & setup</button>
-      <div className="sidebar-note"><div className="note-icon"><Icon name="leaf" size={25}/></div><h3>Good things deserve<br/>a second chapter.</h3><p>Less effort for you.<br/>More life for your things.</p><div className="note-line"/></div>
-      <div className="sidebar-bottom"><span className="avatar">L</span><div>Local workspace<small>Private on this computer</small></div><Icon name="shield" size={17}/></div>
-    </aside>
-    <div className="workspace">
-      <header className="topbar"><button className="text-button settings-entry" onClick={() => setSettings(true)}>Settings</button><span className="breadcrumb">Workspace <span>/</span> <b>Create a listing</b></span><div className="top-actions"><span className={`connection ${!online ? 'offline' : ''}`}><i/>{online ? 'Local workspace' : 'Offline mode'}</span><button className="button small ghost" onClick={async () => { if (install) { await install.prompt(); setInstall(undefined); } else setError('Install Linko from your browser menu: “Install app” in Chrome, or Share → Add to Home Screen in Safari. Keep the local server running for marketplace operations.'); }}><Icon name="download" size={16}/> Install app</button></div></header>
-      <main>
-        <div className="page-heading"><div><div className="eyebrow"><span/> A LITTLE HELP, A GREAT LISTING</div><h1>Sell something good<span>.</span></h1><p>Your photos. A few details. We’ll take care of the busywork.</p></div><button className="button ghost new-draft" onClick={newDraft} disabled={working || running || !online}><Icon name="plus" size={17}/> New draft</button></div>
-        {!online && <div className="notice">You’re offline. Edit and save your text on this device. Connect to your workspace to upload photos, analyze or publish.</div>}
-        {cfg && !(cfg.everyday?.signedIn ?? cfg.codex.chatgptSignedIn) && <div className="setup-banner"><Icon name="link" size={18}/><span>Your draft is ready for you. Check your saved AI connection in Settings and sign in to MyMarket to prepare a listing.</span><button onClick={() => setSettings(true)}>Set up connection <Icon name="arrow" size={16}/></button></div>}
-        {error && <div className="notice error" role="alert"><span>{error}</span><button aria-label="Dismiss message" onClick={() => setError('')}><Icon name="close" size={17}/></button></div>}
-        <label className="account-choice">MyMarket account<select aria-label="Listing account" value={draft?.accountId || 'legacy'} disabled={locked || working || !online} onChange={e => edit('accountId', e.target.value)}>
-          {accounts.map(a => <option key={a.id} value={a.id}>{a.label} · {a.activeListings} of 5 free listings used</option>)}
-          {draft?.accountId && !accounts.some(a => a.id === draft.accountId) && <option value={draft.accountId}>Removed account — choose another</option>}
-        </select></label>
-        <div className="steps" aria-label="Listing steps">{['Add photos', 'Item details', 'Review & list'].map((label, i) => <button key={label} onClick={() => setStep(i + 1)} className={step === i + 1 ? 'selected' : ''} aria-current={step === i + 1 ? 'step' : undefined}><span className="step-number">{i + 1}</span><span>{label}</span>{i < 2 && <span className="step-line"/>}</button>)}</div>
-        <div className="editor-grid"><section className="editor">
-          {step === 1 && <div className="panel"><div className="panel-heading"><div className="number-tag">01</div><div><h2>Start with the photos</h2><p>Show the whole item, then the little details.</p></div><span className="count-pill">{draft?.photos.length || 0} / 8</span></div>
-            <input ref={input} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={e => void photos(e.target.files)} disabled={locked || working || !online || !draft}/>
-            <button className="dropzone" onClick={() => input.current?.click()} disabled={locked || working || !online || !draft || (draft?.photos.length || 0) >= 8} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (!locked && !working) void photos(e.dataTransfer.files); }}><span className="upload-icon"><Icon name="photo" size={31}/><span>+</span></span><strong>{working ? 'Taking care of your photos…' : 'Drop your photos here'}</strong><span>or <u>browse files</u> from your device</span><small>JPG, PNG or WebP · up to 12 MB each</small></button>
-            {!!draft?.photos.length && <div className="photo-grid">{draft.photos.map((p, index) => <div className={'photo-tile ' + (p.id === draft.coverId ? 'cover' : '')} key={p.id}><button className="photo-select" disabled={locked || working} onClick={() => edit('coverId', p.id)} aria-label={`Use photo ${index + 1} as cover`}><img src={imageUrl(p.id)} alt={`Item photo ${index + 1}`}/></button><button className="photo-remove" aria-label={`Remove photo ${index + 1}`} disabled={locked || working || !online || !draft} onClick={() => void remove(p.id)}><Icon name="close" size={14}/></button><span className="cover-badge">{p.id === draft.coverId ? <><Icon name="spark" size={12}/> Cover photo</> : `Photo ${index + 1}`}</span></div>)}</div>}
-            <div className="photo-tip"><span><Icon name="spark" size={20}/></span><div><strong>You choose the first impression</strong><p>Tap a photo to make it the main photo. We upload your choice first.</p></div></div>
-            <div className="panel-footer"><span>Only your item. No filters needed.</span><button className="button primary" onClick={() => setStep(2)}>Add item details <Icon name="arrow" size={17}/></button></div>
-          </div>}
-          {step === 2 && <div className="panel"><div className="panel-heading"><div className="number-tag">02</div><div><h2>A few details go a long way</h2><p>Tell us what you know. We’ll ask for anything else.</p></div></div><div className="form-fields"><div className="field-row"><label>Asking price <span>*</span><div className="price-input"><input aria-label="Asking price" inputMode="decimal" value={draft?.price || ''} onChange={e => edit('price', e.target.value)} placeholder="0.00" disabled={locked || !draft}/><select aria-label="Currency" value={draft?.currency || 'GEL'} onChange={e => edit('currency', e.target.value)} disabled={locked || !draft}><option value="GEL">₾ GEL</option><option value="USD">$ USD</option></select></div></label><label>Model or item name <small>optional</small><input value={draft?.model || ''} onChange={e => edit('model', e.target.value)} placeholder="e.g. Canon EOS R50" maxLength={200} disabled={locked || !draft}/></label></div><label>Description <span>*</span><textarea value={draft?.description || ''} onChange={e => edit('description', e.target.value)} placeholder="What are you selling? Describe its condition, what’s included, and anything a buyer should know." rows={6} maxLength={6000} disabled={locked || !draft}/><small className="field-help">An honest description makes a better listing. We won’t guess specifications.</small></label><div className="field-row"><label>Condition <small>optional for now</small><select value={draft?.condition || ''} onChange={e => edit('condition', e.target.value)} disabled={locked || !draft}><option value="">Choose if known</option><option>New</option><option>Like new</option><option>Used</option><option>For parts / not working</option></select></label><label>City / location <small>optional for now</small><input value={draft?.location || ''} onChange={e => edit('location', e.target.value)} placeholder="e.g. Tbilisi" maxLength={200} disabled={locked || !draft}/></label></div></div><div className="panel-footer"><button className="text-button" onClick={() => setStep(1)}>Back to photos</button><button className="button primary" disabled={!hasBasics || locked || working || !online} onClick={() => void action('analyze')}><Icon name="spark" size={17}/> Find my category</button></div><p className="privacy-note"><Icon name="shield" size={14}/> Everyday AI uses your item details, chosen cover photo and saved category tree.</p></div>}
-          {step === 3 && <div className="panel"><div className="panel-heading"><div className="number-tag">03</div><div><h2>Make it yours, then list it</h2><p>Review the details before they go to MyMarket.</p></div></div>
-            {running && <div className="progress-card" role="status"><span className="spinner"/><div><strong>{draft?.state === 'publishing' ? 'Publishing your listing' : 'Your assistant is on it'}</strong><p>{draft?.message}</p></div></div>}
-            {!running && draft?.message && <div className={`status-card ${draft.state === 'blocked' || draft.state === 'unknown' ? 'attention' : ''}`} role="status"><Icon name={draft.state === 'published' ? 'check' : 'spark'} size={20}/><p>{draft.message}</p></div>}
-            <div className="form-fields"><label>Listing title <small>editable</small><input value={draft?.title || ''} onChange={e => edit('title', e.target.value)} placeholder="A clear title for your item" maxLength={120} disabled={locked || !draft}/></label><label>Category path <small>{draft?.categoryMethod || 'choose with Find category'}</small><input value={draft?.category.join(' > ') || ''} onChange={e => edit('category', e.target.value.split('>').map(s => s.trim()).filter(Boolean))} placeholder="Analyze to find the current category" disabled={locked || !draft}/><small className="field-help">Choose a suggested path or correct it. We’ll match it to the live listing form.</small></label>
-              {!!draft?.categoryCandidates?.length && <fieldset><legend>Choose a category</legend>{draft.categoryCandidates.map(path => <button type="button" className="button ghost" key={path.join(' > ')} disabled={locked || working} onClick={() => edit('category', path)}>{path.join(' › ')}</button>)}</fieldset>}
-              {!!draft?.comparables.length && <div className="sources"><strong>How we found the category</strong>{draft.comparables.map(c => <a href={c.url} key={c.url} target="_blank" rel="noreferrer"><Icon name="link" size={14}/><span>{c.title}<small>{c.breadcrumbs.join(' › ')}</small></span><span>↗</span></a>)}</div>}
-              {!!draft?.questions.length && <div className="missing-fields"><h3>Just a few things only you know</h3><p>These facts are required by the current marketplace form.</p>{draft.questions.map(q => <label key={q.key}>{q.label}{q.options.length ? <select value={draft.facts[q.key] || ''} disabled={locked || !draft} onChange={e => edit('facts', { ...draft.facts, [q.key]: e.target.value })}><option value="">Choose the correct detail</option>{q.options.map(o => <option key={o}>{o}</option>)}</select> : <input value={draft.facts[q.key] || ''} disabled={locked || !draft} onChange={e => edit('facts', { ...draft.facts, [q.key]: e.target.value })} placeholder="Enter the actual item detail"/>}</label>)}</div>}
-              {!!draft?.fields.length && <div className="field-review"><h3>Values observed in the live form</h3>{draft.fields.map((f, i) => <div key={i}><span>{f.label}</span><strong>{f.value}</strong></div>)}<small>To change a value, edit your item details and prepare the form again.</small></div>}
-              {draft?.receipt && <a className="receipt" href={draft.receipt.url} target="_blank" rel="noreferrer"><Icon name="check"/> View your published item <Icon name="arrow" size={17}/></a>}
-              {!!draft?.events.length && <details className="activity"><summary>Listing activity · {draft.events.length} updates</summary><ol>{draft.events.map((event, i) => <li key={i}><time>{new Date(event.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>{event.message}</li>)}</ol></details>}
-            </div>
-            <div className="panel-footer"><button className="text-button" onClick={() => setStep(2)}>Edit item details</button>{draft?.state === 'ready' && !dirty ? <button className="button primary" onClick={() => setConfirm(true)} disabled={working || !online || !cfg?.publishEnabled}>List on MyMarket <Icon name="arrow" size={17}/></button> : <button className="button primary" disabled={!hasBasics || !draft?.category.length || locked || working || !online} onClick={() => void action('prepare')}>Check live listing form <Icon name="arrow" size={17}/></button>}</div>
-            {draft?.state === 'ready' && !cfg?.publishEnabled && <p className="privacy-note">Publishing is disabled in local configuration. Enable it and prepare again when you are ready to list a real item.</p>}
-          </div>}
-          <div className="reassurance"><Icon name="shield" size={17}/><span>You're in control. Nothing is published until you ask.</span></div>
-        </section><aside className="preview-column"><div className="preview-heading"><span>YOUR LISTING, COMING TO LIFE</span><span className="live-dot"/></div><div className="listing-preview"><div className="preview-image">{draft?.coverId ? <img src={imageUrl(draft.coverId)} alt="Selected cover preview"/> : <div className="empty-preview"><span className="empty-orbit"/><span className="empty-photo"><Icon name="photo" size={54}/></span><span className="empty-spark"><Icon name="spark" size={29}/></span><p>A fresh start for<br/>something good.</p></div>}<span className="preview-tag">MyMarket preview</span>{draft?.condition && <span className="condition-tag">{draft.condition}</span>}</div><div className="preview-content"><div className="preview-category">{draft?.category.at(-1) || 'A category that fits'}</div><h3>{draft?.title || draft?.model || 'Your next great listing'}</h3><div className={'preview-price ' + (!draft?.price ? 'placeholder-price' : '')}>{draft?.price ? Number(draft.price).toLocaleString() : '—'} <span>{draft?.currency === 'USD' ? '$' : '₾'}</span></div><p>{draft?.description || 'Add a few details and give buyers a reason to love it.'}</p><div className="preview-meta"><span>{draft?.location || 'Your location'}</span><span>{draft?.photos.length || 0} photos</span></div></div></div><div className="assistant-card"><span className="assistant-icon"><Icon name="spark" size={21}/></span><div><h3>A helpful pair of hands</h3><p>We find similar items, match the category, and check the live form. You make the final call.</p></div></div><div className="save-status"><span className={dirty ? 'unsaved-dot' : 'saved-dot'}/>{dirty ? online ? 'Edits saved on this device' : 'Saved locally · sync when online' : 'Draft saved in your workspace'}<button disabled={working || locked} onClick={async () => { setWorking(true); try { await save(); } catch (e) { setError((e as Error).message); } finally { setWorking(false); } }}>{dirty ? 'Save' : 'Saved'}</button></div></aside></div>
-        <ListingRecords online={online} disabled={working || running} onOpenDraft={async id => {
-          if (dirty && !locked) await save();
-          const next = await api<Draft>('/drafts/' + id);
-          cachedPhotos.current = []; setDraft(next); setDirty(false); setStep(3); setError('');
-        }}/>
-        <footer className="page-footer"><span>Made for less scrolling and more selling.</span><span>Linko × MyMarket <span className="footer-spark">✦</span></span></footer>
-      </main>
-    </div>
-    {online && <AgentWindow disabled={working || running}/>}
-    {settings && <div className="modal-backdrop" onClick={() => setSettings(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="setup-title" onClick={e => e.stopPropagation()}><button className="modal-close" aria-label="Close setup" onClick={() => setSettings(false)}><Icon name="close"/></button><div className="modal-symbol"><Icon name="link" size={28}/></div><h2 id="setup-title">Your private connections</h2><p>The selected Everyday AI handles categories and field matching using its normal server sign-in. You choose the main photo. No provider key is required. Finding a category sends your chosen cover photo and item details to the Everyday AI.</p><Settings online={online} onSaved={() => { void api<NonNullable<typeof cfg>>('/config').then(setCfg).catch(() => {}); }}/><div className="setup-status"><span>Access</span><strong>{cfg?.mode === 'tailnet' ? 'Protected Tailscale HTTPS' : 'Local workspace'}</strong></div><p>MyMarket login is separate from the Linko panel password. Save accounts in Settings. The assistant signs in automatically and asks here for any SMS or email code.</p><div className="setup-status"><span>Real listing publishing</span><strong>{cfg?.publishEnabled ? 'Enabled' : 'Disabled by operator'}</strong></div>{cfg?.mode === 'tailnet' && <button className="button ghost" onClick={async () => { try { await api('/auth/logout', {}, 'POST'); await clearCache(); window.dispatchEvent(new Event('linko-signed-out')); } catch (e) { setError((e as Error).message); } }}>Sign out of Linko panel</button>}</section></div>}
-    {confirm && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="publish-title"><button className="modal-close" aria-label="Cancel publishing" onClick={() => setConfirm(false)}><Icon name="close"/></button><div className="modal-symbol"><Icon name="spark" size={29}/></div><h2 id="publish-title">Ready for its next chapter?</h2><p>This publishes a real listing to your signed-in MyMarket account using the reviewed form. Check the actual values before continuing.</p><div className="confirmation-item"><strong>{draft?.title}</strong><span>{draft?.price} {draft?.currency}</span><small>{draft?.category.join(' › ')}</small></div><p>If the connection breaks during submission, we stop and ask you to check MyMarket before another attempt.</p><button className="button primary" disabled={working || dirty || !online} onClick={() => void action('publish')}>Publish this listing <Icon name="arrow" size={17}/></button><button className="text-button" onClick={() => setConfirm(false)}>Keep reviewing</button></section></div>}
+  const disabled = working || locked(draft) || !draft;
+  const basics = !!draft?.photos.length && !!draft.description.trim() && Number(draft.price) > 0;
+  return <div className="lean-app">
+    <header className="lean-header"><a href="/" className="lean-brand">linko.</a><button className="text-button" onClick={() => setSettings(true)}>Settings</button></header>
+    <main className="lean-main">
+      <div className="lean-heading"><h1>New listing</h1><button className="button ghost" disabled={working || !online} onClick={() => void open()}>New draft</button></div>
+      {!online && <p role="status">Offline mode</p>}
+      {error && <div className="lean-error" role="alert">{error}{saveFailed && <button className="text-button" onClick={() => void perform(async () => { reset(await api<Draft>('/drafts/' + draft!.id)); })}>Reload saved draft</button>}</div>}
+      <section className="panel lean-editor" aria-label="Listing editor">
+        <fieldset disabled={disabled} className="lean-fields">
+          <div className="lean-photos"><label className="photo-upload">Photos · {draft?.photos.length || 0}/8<input ref={input} type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={disabled || !online || (draft?.photos.length || 0) >= 8} onChange={e => void photos(e.target.files)}/></label>
+            {!!draft?.photos.length && <div className="lean-photo-grid">{draft.photos.map((p, i) => <div className={'lean-photo ' + (p.id === draft.coverId ? 'cover' : '')} key={p.id}>
+              <button className="photo-select" onClick={() => edit('coverId', p.id)} aria-label={`Use photo ${i + 1} as cover`} aria-pressed={p.id === draft.coverId}><img src={previews[p.id] || `/api/drafts/${draft.id}/photos/${p.id}`} alt={`Item photo ${i + 1}`}/></button>
+              <span>{p.id === draft.coverId ? 'Cover' : `Photo ${i + 1}`}</span><div className="photo-tools">
+                <button aria-label={`Move photo ${i + 1} earlier`} disabled={disabled || i === 0} onClick={() => { const next = [...draft.photos]; [next[i - 1], next[i]] = [next[i], next[i - 1]]; edit('photos', next); }}>←</button>
+                <button aria-label={`Move photo ${i + 1} later`} disabled={disabled || i === draft.photos.length - 1} onClick={() => { const next = [...draft.photos]; [next[i], next[i + 1]] = [next[i + 1], next[i]]; edit('photos', next); }}>→</button>
+                <button aria-label={`Remove photo ${i + 1}`} disabled={disabled || !online} onClick={() => void perform(async () => { const d = await save(); show(await api<Draft>(`/drafts/${d.id}/photos/${p.id}`, undefined, 'DELETE', d.revision)); })}>×</button>
+              </div></div>)}</div>}
+          </div>
+          <label>Listing title<input value={draft?.title || ''} maxLength={120} onChange={e => edit('title', e.target.value)}/></label>
+          <label>Asking price<div className="price-input"><input aria-label="Asking price" inputMode="decimal" value={draft?.price || ''} onChange={e => edit('price', e.target.value)}/><select aria-label="Currency" value={draft?.currency || 'GEL'} onChange={e => edit('currency', e.target.value)}><option value="GEL">₾ GEL</option><option value="USD">$ USD</option></select></div></label>
+          <label>Description<textarea aria-label="Description" rows={4} maxLength={6000} value={draft?.description || ''} onChange={e => edit('description', e.target.value)}/></label>
+          <label>Listing account<select aria-label="Listing account" value={draft?.accountId || ''} onChange={e => edit('accountId', e.target.value)}><option value="" disabled>Choose account</option>{accounts.map(a => <option value={a.id} key={a.id}>{a.label} · {a.activeListings} of 5 used</option>)}</select></label>
+          <div className="category-row"><label>Category path<input value={categoryText} onChange={e => { edit('category', e.target.value.split('>').map(s => s.trim()).filter(Boolean)); setCategoryText(e.target.value); }}/></label><button className="button ghost" disabled={disabled || !online || !basics} onClick={() => void action('analyze')}>Find category</button></div>
+          {!!draft?.categoryCandidates?.length && <fieldset className="category-choices"><legend>Choose a category</legend>{draft.categoryCandidates.map(path => <button className="button ghost" key={path.join(' > ')} onClick={() => edit('category', path)}>{path.join(' › ')}</button>)}</fieldset>}
+          {!!draft?.questions.length && <div className="required-facts">{draft.questions.map(q => <label key={q.key}>{q.label}{q.options.length ? <select aria-label={q.label} value={draft.facts[q.key] || ''} onChange={e => edit('facts', { ...draft.facts, [q.key]: e.target.value })}><option value="">Choose</option>{q.options.map(o => <option key={o}>{o}</option>)}</select> : <input value={draft.facts[q.key] || ''} onChange={e => edit('facts', { ...draft.facts, [q.key]: e.target.value })}/>}</label>)}</div>}
+        </fieldset>
+        {(running(draft) || ['blocked', 'needs_input', 'unknown'].includes(draft?.state || '')) && <p role="status">{draft?.message}</p>}
+        <div className="lean-publish"><span aria-live="polite">{dirty ? online ? 'Saving…' : 'Saved on this device' : 'Saved'}</span><button className="button primary" disabled={disabled || !online || !basics || !draft?.title.trim() || !draft.accountId || !cfg?.publishEnabled} onClick={() => void action('publish')}>Publish</button></div>
+      </section>
+      <section className="panel lean-drafts" aria-label="Drafts"><details><summary>Drafts · {drafts.length}</summary>{!drafts.length && <p>No drafts</p>}{drafts.map(d => <article key={d.id}><div><strong>{d.title || 'Untitled'}</strong><small>{d.state === 'needs_input' ? 'Needs details' : d.state}</small></div><button className="text-button" disabled={!online || working} onClick={() => void open(d.id)}>Resume {d.title || 'Untitled'}</button><button className="text-button" disabled={!online || working} onClick={() => void perform(async () => { const saved = d.id === current.current?.id ? await save() : d; await api(`/drafts/${d.id}?revision=${saved.revision}`, undefined, 'DELETE'); if (current.current?.id === d.id) reset(await api<Draft>('/drafts', {}, 'POST')); })}>Delete {d.title || 'Untitled'}</button></article>)}</details></section>
+      <ListingRecords online={online} disabled={working} refreshKey={refreshKey} onOpenDraft={open}/>
+    </main>
+    {online && <AgentWindow disabled={working}/>}
+    {settings && <div className="modal-backdrop" onClick={() => setSettings(false)}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="setup-title" onClick={e => e.stopPropagation()}><button className="modal-close" aria-label="Close setup" onClick={() => setSettings(false)}>×</button><h2 id="setup-title">Settings</h2><Settings online={online} onSaved={() => { void refresh().catch(() => {}); }}/>{cfg?.mode === 'tailnet' && <button className="button ghost" onClick={async () => { await api('/auth/logout', {}, 'POST'); await clearCache(); sessionStorage.removeItem('linko-draft'); window.dispatchEvent(new Event('linko-signed-out')); }}>Sign out of Linko panel</button>}</section></div>}
   </div>;
 }
