@@ -33,7 +33,8 @@ test('independent autosaves while browser busy, revision conflicts, photos/order
     f.workflow.busy = true;
     const updates = await Promise.all([a, b].map((d, i) => fetch(`${base}/drafts/${d.id}`, { method: 'PATCH', headers, body: JSON.stringify(patch(d, { title: `Saved ${i}` })) })));
     assert.deepEqual(updates.map(r => r.status), [200, 200]);
-    assert.equal((await fetch(`${base}/drafts/${a.id}`, { method: 'PATCH', headers, body: JSON.stringify(patch(a, { title: 'Stale' })) })).status, 409);
+    const stale = await fetch(`${base}/drafts/${a.id}`, { method: 'PATCH', headers, body: JSON.stringify(patch(a, { title: 'Stale' })) });
+    assert.equal(stale.status, 409); assert.equal((await stale.json()).code, 'CONFLICT');
     let saved = f.store.get(a.id); assert.equal(saved.title, 'Saved 0'); assert.equal(f.store.get(b.id).title, 'Saved 1');
     const form = new FormData(); form.append('photos', new Blob([readFileSync('public/icons/icon-512.png')], { type: 'image/png' }), 'image.png');
     const uploaded = await fetch(`${base}/drafts/${a.id}/photos`, { method: 'POST', headers: { 'X-Linko-Request': '1', 'If-Match': String(saved.revision) }, body: form });

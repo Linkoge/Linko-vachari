@@ -228,7 +228,7 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const status = err instanceof WorkflowError ? (err.code === 'NOT_FOUND' ? 404 : 409) : err instanceof z.ZodError || err instanceof multer.MulterError ? 400 : 500;
     // Never serialize provider, browser, request or database errors; they may contain secrets.
-    res.status(status).json({ message: err instanceof WorkflowError ? err.message : status === 400 ? 'Check your input and photo size, then try again.' : 'The local server could not complete this action. Your saved draft is safe.' });
+    res.status(status).json({ message: err instanceof WorkflowError ? err.message : status === 400 ? 'Check your input and photo size, then try again.' : 'The local server could not complete this action. Your saved draft is safe.', ...(err instanceof WorkflowError && err.code === 'CONFLICT' ? { code: 'CONFLICT' } : {}) });
   });
   return { app, store, workflow, access, monitor, queue };
 }
