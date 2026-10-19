@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { fillDetails } from './details';
-import { SpecCache, snapshotFields, specKey } from './specs';
+import { SpecCache, snapshotFields, specKey, matchingControls, rawFieldLabel } from './specs';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Locator, Page } from 'playwright';
@@ -102,6 +102,7 @@ export class Workflow {
     }
   }
   async initializeDetails(d: Draft) {
+    this.store.event(d, 'Reading category fields…');
     let fields = this.specCache.get(d.category);
     if (!fields) {
       await this.auth.ensureSignedIn(m => this.store.event(d, m));
@@ -143,22 +144,63 @@ export class Workflow {
     return fields;
   }
   async reconcileDetails(d: Draft, questions: Draft['questions']) {
-    let fields = structuredClone(d.specFields || []);
-    if (questions.some(q => !accountField(q) && !fields.some(f => f.key === q.key || f.label === q.label))) {
-      const live = await this.readSpecFields(this.browser.page!, await this.browser.snapshot());
-      fields = live;
+    const previous = structuredClone(d.specFields || []);
+    // Known final-check questions can use the schema already read by preparation.
+    let fields = previous;
+    if (this.browser.page || questions.some(q => !accountField(q) && !previous.some(f => f.key === q.key || f.label === q.label))) {
+      fields = await this.readSpecFields(this.browser.page!, await this.browser.snapshot());
     }
+    const unmatched: Draft['questions'] = [];
     for (const q of questions) {
-      if (accountField(q)) continue;
-      const field = fields.find(f => f.key === q.key || f.label === q.label);
-      if (!field) throw new WorkflowError('FORM', 'A requested detail could not be matched to a live form control. Prepare again.');
-      field.required = true; // Options always come from the live schema, never from action-model wording.
+      if (accountField(q)) { unmatched.push(q); continue; }
+      const old = previous.find(f => f.key === q.key || f.label === q.label);
+      const field = fields.find(f => old?.controlId && f.controlId === old.controlId) || fields.find(f => f.key === q.key || f.label === q.label);
+      if (field) continue; // Requiredness and options come exclusively from the live form.
+      if (old?.required && !rawFieldLabel.test(old.label)) unmatched.push({ key: old.key, label: old.label, options: old.options });
+      else this.noteSkippedDetail(d, old?.label || q.label);
     }
     this.specCache.set(d.category, fields);
     const before = JSON.stringify(d.facts);
     await fillDetails(this, d, fields);
-    d.questions.push(...questions.filter(q => accountField(q)));
-    return before !== JSON.stringify(d.facts);
+    d.questions.push(...unmatched);
+    return !unmatched.length && before !== JSON.stringify(d.facts);
+  }
+  noteSkippedDetail(d: Draft, label: string) {
+    if (rawFieldLabel.test(label)) label = 'unavailable detail';
+    const message = `Skipped optional detail: ${label}.`;
+    if (!d.events.some(e => e.message === message)) this.store.event(d, message);
+  }
+  requireDetail(d: Draft, field: NonNullable<Draft['specFields']>[number]) {
+    d.questions = [{ key: field.key, label: field.label, options: field.options }];
+    d.state = 'needs_input';
+    this.store.event(d, `Please check ${field.label} below, then press Publish.`);
+  }
+  async fillSavedDetails(page: Page, snapshot: Snapshot, d: Draft) {
+    for (const f of d.specFields || []) {
+      const value = d.facts[f.key];
+      if (!value) continue;
+      const matches = matchingControls(f, snapshot).filter(e => !e.disabled);
+      if (!matches.length) {
+        if (f.required) { this.requireDetail(d, f); return 'needs_input'; }
+        this.noteSkippedDetail(d, f.label); continue;
+      }
+      const e = matches[0];
+      if (e.role === 'combobox' || ['radio', 'checkbox'].includes(e.type)) continue;
+      if (e.value === value) continue;
+      if (matches.length !== 1 || (e.tag === 'select' && !e.options.includes(value))) {
+        if (f.required) { this.requireDetail(d, f); return 'needs_input'; }
+        this.noteSkippedDetail(d, f.label); continue;
+      }
+      const action = e.tag === 'select' ? 'select' : 'fill';
+      try {
+        await this.step(page, snapshot, { action, target: e.id, source: `facts.${f.key}`, value, questions: [], reason: '' }, d, 'prepare', '');
+        d.automation?.steps.push({ action, target: signature(e), source: `facts.${f.key}`, value });
+        return 'filled';
+      } catch (error) {
+        if (f.required) { this.requireDetail(d, f); return 'needs_input'; }
+        this.noteSkippedDetail(d, f.label);
+      }
+    }
   }
   async deriveRequired(d: Draft, questions: Draft['questions']) {
     questions = questions.filter(q => accountField(q) !== 'phone');
@@ -215,12 +257,15 @@ export class Workflow {
   }
   async step(page: Page, snapshot: Snapshot, dec: Decision, d: Draft, phase: 'search' | 'prepare', query: string) {
     if (dec.action === 'wait') { await page.waitForTimeout(1000); return; }
+    const requested = ['fill', 'select'].includes(dec.action) && dec.source?.startsWith('facts.') ? d.specFields?.find(f => f.key === dec.source.slice(6)) : undefined;
+    const matches = requested ? matchingControls(requested, snapshot) : [];
+    if (matches.length === 1) dec.target = matches[0].id;
     const e = snapshot.elements.find(e => e.id === dec.target);
     if (!e || e.disabled) throw new WorkflowError('STALE', 'The form changed during this step. Prepare it again using the current form.');
     const loc = page.locator(`[data-linko="${e.id}"]`);
     if (await loc.count() !== 1) throw new WorkflowError('STALE', 'The marketplace control changed. Try this step again.');
     const value = sourceValue(d, dec.source, query);
-    const field = d.specFields?.find(f => f.label === (e.group || e.label));
+    const field = d.specFields?.find(f => matchingControls(f, snapshot).some(control => control.id === e.id));
     if (field && ['fill', 'select'].includes(dec.action) && (dec.source !== `facts.${field.key}` || (e.tag === 'select' && dec.value !== d.facts[field.key]))) throw new WorkflowError('FACT', 'The form value must match the saved listing detail.');
     if (dec.action === 'click') {
       if (e.href && !allowedUrl(e.href)) throw new WorkflowError('DOMAIN', 'The marketplace requested an unsupported navigation. Inspect it in the local browser.');
@@ -305,23 +350,30 @@ export class Workflow {
           d.state = 'needs_input'; this.store.event(d, 'Add the required mobile phone below or save it in Settings → Accounts, then press Publish.'); return null;
         }
       }
-      const dec = await this.decide(decisionSchema, operatingInstructions, JSON.stringify({ task: discover ? 'Read the live category form: navigate to Add listing and select the supplied full category path, descending to a leaf. Return done as soon as its final listing form is visible. Do not fill item fields, upload photos, submit, or ask about missing facts. They will be filled later. Select only category controls.' : phase === 'search' ? `Search comparable items for ${query}. Return done when relevant product links are visible.` : 'Find the add-listing entry, reconcile the supplied category with live options, descend through all live children to a selectable leaf (never stop at a parent), fill all required known fields, upload photos cover first, and stop with done at the final publishing control. Do not publish. Return blocked and missing questions if necessary.', draft: { title: d.title, description: d.description, price: d.price, currency: d.currency, model: d.model, condition: d.condition, location: d.location, facts: itemFacts(d.facts, d.questions), specFields: d.specFields, category: d.category, photoCount: d.photos.length, savedFields: d.fields }, uploaded, query, history: history.slice(-12), page: snapshot }));
-      if (!discover && phase === 'prepare') {
-        if (!checkedSchema && ['blocked', 'done'].includes(dec.action) && snapshot.elements.some(e => publishLabel.test(e.label))) {
+      if (!discover && phase === 'prepare' && snapshot.elements.some(e => publishLabel.test(e.label))) {
+        if (!checkedSchema) {
           checkedSchema = true;
+          this.store.event(d, 'Reading category fields…');
           const fields = await this.readSpecFields(page, snapshot);
-          if (JSON.stringify(fields) !== JSON.stringify(d.specFields || [])) {
-            this.specCache.set(d.category, fields);
-            await fillDetails(this, d, fields, true);
-          }
-          continue; // Dropdown observations change semantic IDs.
+          const missingRequired = (d.specFields || []).find(f => f.required && !rawFieldLabel.test(f.label) && !matchingControls(f, snapshot).length);
+          if (missingRequired) { this.requireDetail(d, missingRequired); return null; }
+          for (const f of d.specFields || []) if (!f.required && !matchingControls(f, snapshot).length) this.noteSkippedDetail(d, f.label);
+          this.specCache.set(d.category, fields);
+          if (JSON.stringify(fields) !== JSON.stringify(d.specFields || [])) await fillDetails(this, d, fields, true);
+          continue; // Reading dropdowns changes transient observation IDs.
         }
+        const filled = await this.fillSavedDetails(page, snapshot, d);
+        if (filled === 'needs_input') return null;
+        if (filled === 'filled') continue;
       }
+      const dec = await this.decide(decisionSchema, operatingInstructions, JSON.stringify({ task: discover ? 'Read the live category form: navigate to Add listing and select the supplied full category path, descending to a leaf. Return done as soon as its final listing form is visible. Do not fill item fields, upload photos, submit, or ask about missing facts. They will be filled later. Select only category controls.' : phase === 'search' ? `Search comparable items for ${query}. Return done when relevant product links are visible.` : 'Find the add-listing entry, reconcile the supplied category with live options, descend through all live children to a selectable leaf (never stop at a parent), fill all required known fields, upload photos cover first, and stop with done at the final publishing control. Do not publish. Return blocked and missing questions if necessary.', draft: { title: d.title, description: d.description, price: d.price, currency: d.currency, model: d.model, condition: d.condition, location: d.location, facts: itemFacts(d.facts, d.questions), specFields: d.specFields, category: d.category, photoCount: d.photos.length, savedFields: d.fields }, uploaded, query, history: history.slice(-12), page: snapshot }));
       if (dec.action === 'category_unavailable') throw new WorkflowError('CATEGORY_UNAVAILABLE', 'The chosen category is no longer offered on the live form.');
       if (dec.action === 'blocked') {
         if (discover && snapshot.elements.some(e => publishLabel.test(e.label))) return { snapshot, uploaded };
         if (!discover && dec.questions.length) {
-          if (await this.reconcileDetails(d, dec.questions) || !d.questions.length) { history.push('Required details are saved in facts; fill each matching live control from facts.<key>.'); continue; }
+          const changed = await this.reconcileDetails(d, dec.questions);
+          if (!changed && !d.questions.length && uploaded && snapshot.elements.some(e => publishLabel.test(e.label))) return { snapshot, uploaded };
+          if (changed || !d.questions.length) { history.push('Required details are saved in facts; fill each matching live control from facts.<key>. Optional unmatched details were skipped; do not request them again.'); continue; }
           d.state = 'needs_input'; this.store.event(d, 'The live form needs a few more facts. Please answer below, then press Publish.'); return null;
         }
         throw new WorkflowError('FORM', 'The current marketplace form needs manual inspection. Retry automatic sign-in and try again.');
@@ -331,13 +383,18 @@ export class Workflow {
       if (discover && (!['click', 'select', 'wait'].includes(dec.action) || (dec.action === 'select' && dec.source !== 'category') || (dec.action === 'click' && dec.source && dec.source !== 'category'))) throw new WorkflowError('FORM', 'The category form could not be read without changing item fields. Retry Find category.');
       try {
         if (dec.action === 'upload' && uploaded) throw new WorkflowError('PHOTO', 'Photos were already uploaded in this form. Inspect the browser before retrying.');
-        const target = snapshot.elements.find(e => e.id === dec.target);
         await this.step(page, snapshot, dec, d, phase, query);
+        const target = snapshot.elements.find(e => e.id === dec.target);
         if (phase === 'prepare' && !discover && target && !privateControl(target) && ['click','fill','select','upload'].includes(dec.action)) d.automation!.steps.push({ action: dec.action as 'click' | 'fill' | 'select' | 'upload', target: signature(target), source: dec.source, value: dec.value });
         if (dec.action === 'upload') uploaded = true;
         failures = 0; history.push(`${dec.action} ${snapshot.elements.find(e => e.id === dec.target)?.label || ''}`);
       } catch (e) {
         if (e instanceof WorkflowError) {
+          const optional = phase === 'prepare' && !discover && dec.source?.startsWith('facts.') ? d.specFields?.find(f => f.key === dec.source.slice(6) && !f.required) : undefined;
+          if (optional && ['FACT', 'STALE', 'FORM'].includes(e.code)) {
+            this.noteSkippedDetail(d, optional.label); delete d.facts[optional.key];
+            history.push(`Skipped optional detail: ${optional.label}. Continue with required fields.`); continue;
+          }
           if (e.code === 'FACT' && phase === 'prepare' && !discover) {
             const fields = await this.readSpecFields(page, await this.browser.snapshot(page));
             if (JSON.stringify(fields) !== JSON.stringify(d.specFields || [])) {
@@ -345,6 +402,8 @@ export class Workflow {
               history.push('Live field options changed. Use the refreshed saved details.'); continue;
             }
           }
+          const required = dec.source?.startsWith('facts.') ? d.specFields?.find(f => f.key === dec.source.slice(6) && f.required) : undefined;
+          if (required && ['FACT', 'STALE', 'FORM'].includes(e.code)) { this.requireDetail(d, required); return null; }
           throw e;
         }
         // Failed clicks/fills are re-observed, never blindly replayed. Upload is not retried.
@@ -525,8 +584,11 @@ export class Workflow {
     if (!result.uploaded || buttons.length !== 1) throw new WorkflowError('FORM', 'The app could not verify uploaded photos and a unique publishing control. Inspect the live form and prepare again.');
     for (const f of d.specFields || []) {
       const value = d.facts[f.key]; if (!value) continue;
-      const controls = result.snapshot.elements.filter(e => (e.group || e.label) === f.label);
-      if (!controls.some(e => e.type === 'radio' ? e.checked && e.label === value : e.value === value)) throw new WorkflowError('VERIFY', `The live ${f.label} does not match the saved value. Prepare again.`);
+      const controls = matchingControls(f, result.snapshot);
+      if (!controls.some(e => e.type === 'radio' ? e.checked && e.label === value : e.value === value)) {
+        if (f.required) { this.requireDetail(d, f); return; }
+        this.noteSkippedDetail(d, f.label); delete d.facts[f.key];
+      }
     }
     const validation = await this.decide(decisionSchemas.audit, 'Audit the final live form against the draft. Reject fees, paid promotions or upgrades by returning fieldsMatch=false. For a saved recipe, restore all savedFields including optional/default values exactly; return false if uncertain. Verify selected full category path agrees semantically with the witnessed category and ends at a live selectable leaf with no remaining category children; reject any parent or incomplete category selection; verify price, currency, description, title, supplied facts, photo thumbnails count and cover first. Optional fields the form does not mark as required (for example brand, size or promotion/delivery switches left at their defaults) may stay empty: never fail the audit or ask a question for them, and never ask the owner to supply photos or contact details. Do not trust defaults for factual attributes without source. If any unknown factual defaults, missing facts, mismatches or uncertain upload, fail. Return observed form fields and their source keys for explicit user review. Omit contact/password/account data.', JSON.stringify({ draft: { title: d.title, description: d.description, price: d.price, currency: d.currency, model: d.model, condition: d.condition, location: d.location, facts: itemFacts(d.facts, d.questions), category: d.category, savedFields: d.fields, photoCount: d.photos.length }, page: result.snapshot }));
     if (!validation.categoryMatches) throw new WorkflowError('CATEGORY_UNAVAILABLE', 'The chosen category does not match the live form.');

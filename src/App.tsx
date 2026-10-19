@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Draft } from '../server/types';
+import { rawFieldLabel, type Draft } from '../server/types';
 import { readCache, writeCache, clearCache } from './cache';
 import { VerificationPrompt } from './VerificationPrompt';
 import { Settings } from './Settings';
@@ -17,6 +17,7 @@ const locked = (d?: Draft) => running(d) || ['published', 'unknown'].includes(d?
 export function App() {
   const [draft, setDraft] = useState<Draft>(); const current = useRef<Draft | undefined>(undefined);
   const [dirty, setDirty] = useState(false), dirtyRef = useRef(false), version = useRef(0);
+  const [savingNow, setSavingNow] = useState(false);
   const saving = useRef<Promise<Draft> | undefined>(undefined);
   const confirmed = useRef<Draft | undefined>(undefined);
   type Upload = { id: string; name: string; preview: string; progress: number };
@@ -90,9 +91,17 @@ export function App() {
     }
   }, [draft, dirty, online]);
   useEffect(() => {
-    if (!online || !running(draft)) return;
+    if (!online || !draft) return;
     const id = draft!.id;
-    const timer = setInterval(() => { void api<Draft>('/drafts/' + id).then(d => { if (current.current?.id === id) show(d); }).catch(e => setError(e.message)); }, 900);
+    let fetching = false;
+    const timer = setInterval(() => {
+      if (fetching || dirtyRef.current || saving.current || pendingUploads.current.length) return;
+      const local = current.current, v = version.current;
+      fetching = true;
+      void api<Draft>('/drafts/' + id).then(d => {
+        if (current.current === local && current.current?.id === id && version.current === v && !dirtyRef.current && !saving.current && !pendingUploads.current.length && JSON.stringify(d) !== JSON.stringify(local)) show(d);
+      }).catch(() => {}).finally(() => { fetching = false; });
+    }, 900);
     return () => clearInterval(timer);
   }, [online, draft?.id, draft?.state]);
   useEffect(() => {
@@ -134,8 +143,8 @@ export function App() {
         }
       }
     })();
-    saving.current = task;
-    try { return await task; } finally { saving.current = undefined; }
+    setSavingNow(true); saving.current = task;
+    try { return await task; } finally { saving.current = undefined; setSavingNow(false); }
   }
   function acceptPhotos(next: Draft) {
     const local = current.current, base = confirmed.current;
@@ -200,8 +209,8 @@ export function App() {
     await perform(async () => {
       const d = await save();
       const result = await api<{ nextDraft?: Draft }>(`/drafts/${d.id}/${op}`, { revision: d.revision }, 'POST');
-      if (result.nextDraft) reset(result.nextDraft);
-      else show({ ...d, state: 'queued', message: 'Finding category…' });
+      if (result.nextDraft) { reset(result.nextDraft); setSection('My listings'); }
+      else show({ ...d, state: 'queued', message: op === 'details' ? 'Reading category fields…' : 'Finding category…' });
     });
   }
   const disabled = working || locked(draft) || !draft;
@@ -210,7 +219,7 @@ export function App() {
   const publishReason = !online ? 'Reconnect to publish' : !draft ? 'Loading draft…' : uploading ? 'Uploading photos…' : working ? 'Wait for the current action to finish' : running(draft) ? 'This listing is being processed' : draft.state === 'unknown' ? 'Check this submission on MyMarket before continuing' : draft.state === 'published' ? 'This listing is already published' : !cfg ? 'Checking publishing settings…' : !cfg.publishEnabled ? 'Publishing is off' : saveFailed ? 'Reload the saved draft before publishing' : !draft.photos.length ? 'Add at least one photo' : !draft.title.trim() ? 'Add a listing title' : !draft.description.trim() ? 'Add a description' : !(Number(draft.price) > 0) ? 'Enter a price greater than zero' : !draft.accountId ? 'Choose a listing account' : '';
   return <div className="lean-app">
     <header className="lean-header"><span className="lean-brand">linko.</span>{cfg?.mode === 'tailnet' && <button className="text-button" onClick={async () => { await api('/auth/logout', {}, 'POST'); await clearCache(); sessionStorage.removeItem('linko-draft'); window.dispatchEvent(new Event('linko-signed-out')); }}>Sign out of Linko panel</button>}</header>
-    <nav className="lean-nav" aria-label="Main navigation">{(['New listing', 'Drafts', 'My listings', 'Settings'] as const).map(name => <button key={name} aria-current={section === name ? 'page' : undefined} onClick={() => setSection(name)}>{name}</button>)}</nav>
+    <nav className="lean-nav" aria-label="Main navigation">{(['New listing', 'Drafts', 'My listings', 'Settings'] as const).map(name => <button key={name} aria-current={section === name ? 'page' : undefined} disabled={name === 'New listing' && (working || uploading || !online)} onClick={() => { if (name === 'New listing' && section !== 'New listing') void open(); else setSection(name); }}>{name}</button>)}</nav>
     <main className="lean-main">
       <div className="lean-heading"><h1>{section}</h1>{section === 'New listing' && <button className="button ghost" disabled={working || uploading || !online} onClick={() => void open()}>New draft</button>}</div>
       {!online && <p role="status">Offline mode</p>}
@@ -238,13 +247,13 @@ export function App() {
           <label className="listing-location">City<input maxLength={200} value={draft?.location || listingAccount?.defaults?.location || defaultCity} onChange={e => edit('location', e.target.value)}/></label>
           <div className="category-row"><label>Category path<input value={categoryText} onChange={e => { edit('category', e.target.value.split('>').map(s => s.trim()).filter(Boolean)); setCategoryText(e.target.value); }}/></label><button className="button ghost" disabled={disabled || uploading || !online || !basics} aria-describedby={uploading ? 'photo-upload-reason' : undefined} onClick={() => void action('analyze')}>Find category</button></div>
           <label className="estimate-details"><input type="checkbox" checked={draft?.estimateMissing || false} onChange={e => { edit('estimateMissing', e.target.checked); if (e.target.checked && draft?.category.length && online && !uploading) void action('details'); }}/>Estimate missing details</label>
-          {!!draft?.specFields?.length && <div className="spec-fields" aria-label="Category details">{draft.specFields.map(f => {
-            const value = draft.facts[f.key] || '', missing = f.required && !value, source = draft.detailSources?.[f.key];
+          {!!draft?.specFields?.length && <div className="spec-fields" aria-label="Category details">{draft.specFields.filter(f => !rawFieldLabel.test(f.label)).map(f => {
+            const value = draft.facts[f.key] || '', missing = f.required && (!value || draft.questions.some(q => q.key === f.key)), source = draft.detailSources?.[f.key];
             return <label key={f.key} className={missing ? 'missing-detail' : ''}><span>{f.label}{missing && <small>Required</small>}{!!value && source && source !== 'owner' && <small>{source === 'estimated' ? 'estimated' : source === 'input' ? 'AI · from text' : 'AI · looked up'}</small>}</span>{f.options.length ? <select aria-label={f.label} aria-required={f.required} value={value} onChange={e => { edit('facts', { ...current.current!.facts, [f.key]: e.target.value }); edit('detailSources', { ...current.current!.detailSources, [f.key]: 'owner' }); }}><option value="">Choose</option>{f.options.map(o => <option key={o}>{o}</option>)}</select> : <input aria-label={f.label} aria-required={f.required} value={value} maxLength={500} onChange={e => { edit('facts', { ...current.current!.facts, [f.key]: e.target.value }); edit('detailSources', { ...current.current!.detailSources, [f.key]: 'owner' }); }}/>}</label>;
           })}</div>}
           {uploading && <p id="photo-upload-reason" role="status">Uploading photos…</p>}
           {!!draft?.categoryCandidates?.length && <fieldset className="category-choices"><legend>Choose a category</legend>{draft.categoryCandidates.map(path => <button className="button ghost" key={path.join(' > ')} onClick={() => { edit('category', path); void action('details'); }}>{path.join(' › ')}</button>)}</fieldset>}
-          {!!draft?.questions.filter(q => !draft.specFields?.some(f => f.key === q.key)).length && <div className="required-facts" aria-label="Required information"><p>Needs info · answer below, then press Publish.</p>{draft.questions.filter(q => !draft.specFields?.some(f => f.key === q.key)).map(q => {
+          {!!draft?.questions.filter(q => !draft.specFields?.some(f => f.key === q.key)).length && <div className="required-facts" aria-label="Required information"><p>Needs info · answer below, then press Publish.</p>{draft.questions.filter(q => !rawFieldLabel.test(q.label) && !draft.specFields?.some(f => f.key === q.key)).map(q => {
             const field = accountField(q), value = field === 'location' ? draft.location || listingAccount?.defaults?.location || defaultCity : field === 'phone' ? draft.facts[q.key] || draft.facts.phone || '' : draft.facts[q.key] || '';
             const answer = (v: string) => {
               if (field === 'location') edit('location', v);
@@ -256,9 +265,9 @@ export function App() {
           })}</div>}
         </fieldset>
         {(running(draft) || ['blocked', 'needs_input', 'unknown'].includes(draft?.state || '')) && <p role="status">{draft?.message}</p>}
-        <div className="lean-publish"><span aria-live="polite">{dirty ? online ? 'Saving…' : 'Saved on this device' : 'Saved'}</span><div className="publish-action">{publishReason && <p id="publish-reason" aria-live="polite">{publishReason}{publishReason === 'Publishing is off' && <> — turn it on in <a href="#settings" onClick={e => { e.preventDefault(); setSection('Settings'); }}>Settings</a></>}</p>}<button className="button primary" disabled={!!publishReason} aria-describedby={publishReason ? 'publish-reason' : undefined} onClick={() => void action('publish')}>Publish</button></div></div>
+        <div className="lean-publish"><button className="button ghost" aria-label="Save draft" disabled={!draft || !online || working || locked(draft) || savingNow} onClick={() => void perform(async () => { await save(); })}>Save draft <span aria-live="polite">{savingNow || dirty && online ? 'Saving…' : dirty ? 'Saved on this device' : 'Saved'}</span></button><div className="publish-action">{publishReason && <p id="publish-reason" aria-live="polite">{publishReason}{publishReason === 'Publishing is off' && <> — turn it on in <a href="#settings" onClick={e => { e.preventDefault(); setSection('Settings'); }}>Settings</a></>}</p>}<button className="button primary" disabled={!!publishReason} aria-describedby={publishReason ? 'publish-reason' : undefined} onClick={() => void action('publish')}>Publish</button></div></div>
       </section>}
-      {section === 'Drafts' && <section className="panel lean-drafts" aria-label="Drafts">{!drafts.length && <p>No drafts</p>}{drafts.map(d => <article key={d.id}><div><strong>{d.title || 'Untitled'}</strong><small>{d.state === 'needs_input' ? 'Needs details' : d.state}</small></div><button className="text-button" disabled={!online || working || uploading} onClick={() => void open(d.id)}>Resume {d.title || 'Untitled'}</button><button className="text-button" disabled={!online || working || uploading} onClick={() => void perform(async () => { const saved = d.id === current.current?.id ? await save() : d; await api(`/drafts/${d.id}?revision=${saved.revision}`, undefined, 'DELETE'); if (current.current?.id === d.id) reset(await api<Draft>('/drafts', {}, 'POST')); })}>Delete {d.title || 'Untitled'}</button></article>)}</section>}
+      {section === 'Drafts' && <section className="panel lean-drafts" aria-label="Drafts">{!drafts.length && <p>No drafts</p>}{drafts.map(d => <article key={d.id} tabIndex={0} aria-label={d.title || 'Untitled'} onClick={() => { if (online && !working && !uploading) void open(d.id); }} onKeyDown={e => { if (e.target === e.currentTarget && ['Enter', ' '].includes(e.key)) { e.preventDefault(); if (online && !working && !uploading) void open(d.id); } }}><div><strong>{d.title || 'Untitled'}</strong><small>{d.state === 'needs_input' ? 'Needs details' : d.state}</small></div><button className="text-button" disabled={!online || working || uploading} onClick={e => { e.stopPropagation(); void open(d.id); }}>Open {d.title || 'Untitled'}</button><button className="text-button" disabled={!online || working || uploading} onClick={e => { e.stopPropagation(); void perform(async () => { const saved = d.id === current.current?.id ? await save() : d; await api(`/drafts/${d.id}?revision=${saved.revision}`, undefined, 'DELETE'); if (current.current?.id === d.id) reset(await api<Draft>('/drafts', {}, 'POST')); }); }}>Delete {d.title || 'Untitled'}</button></article>)}</section>}
       {section === 'My listings' && <MyListings online={online} onOpen={id => void open(id)}/>}
       {section === 'Settings' && <Settings online={online} onSaved={() => { setRefreshKey(v => v + 1); }}/>}
     </main>

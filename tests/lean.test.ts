@@ -48,6 +48,7 @@ test('My listings merges durable jobs and receipts without duplicate rows or pri
     };
     let rows = await get(); assert.equal(rows.length, 2);
     assert.equal(rows.find(r => r.id === queued.id)?.status, 'queued');
+    assert.equal(rows.find(r => r.id === queued.id)?.progress, 'Waiting to publish…');
     const row = rows.find(r => r.id === live.id)!;
     assert.equal(row.status, 'live'); assert.equal(row.price, '25'); assert.equal(row.currency, 'GEL'); assert.equal(row.account, 'Studio');
     assert.equal(row.url, live.receipt.url); assert.equal(row.canDelete, true); assert.equal('recipe' in row, false); assert.equal('fingerprint' in row, false);
@@ -63,7 +64,9 @@ test('My listings merges durable jobs and receipts without duplicate rows or pri
     f.flow.accounts.remove(live.accountId!);
     assert.equal((await get()).find(r => r.id === live.id)?.account, 'Studio');
     f.store.db.prepare("UPDATE jobs SET status='running' WHERE draft=?").run(queued.id);
+    f.store.event(f.store.get(queued.id), 'Reading category fields…');
     assert.equal((await get()).find(r => r.id === queued.id)?.status, 'publishing');
+    assert.equal((await get()).find(r => r.id === queued.id)?.progress, 'Reading category fields…');
     f.store.db.prepare("UPDATE jobs SET status='failed' WHERE draft=?").run(queued.id);
     assert.equal((await get()).find(r => r.id === queued.id)?.status, 'failed');
     f.queue.enqueue(queued.id, 'submit'); assert.equal((await get()).filter(r => r.id === queued.id).length, 1);

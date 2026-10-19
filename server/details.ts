@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { decisionSchemas, estimateSchema } from './decision-schemas';
 import { privateDir } from './config';
 import { itemFacts } from './required-info';
-import { ownerDetail } from './specs';
+import { ownerDetail, specSchemaVersion, rawFieldLabel } from './specs';
 import type { Draft, SpecField } from './types';
 import type { Workflow } from './workflow';
 
@@ -10,9 +10,20 @@ export async function fillDetails(flow: Workflow, d: Draft, fields: SpecField[],
   if (d.specCategory && JSON.stringify(d.specCategory) !== JSON.stringify(d.category)) {
     for (const f of d.specFields || []) { delete d.facts[f.key]; if (d.detailSources) delete d.detailSources[f.key]; }
   }
+  // Preserve answers when a refreshed visible label replaces an old internal name.
+  for (const f of fields) {
+    const old = (f.controlId ? d.specFields?.find(o => o.controlId === f.controlId || o.key === f.controlId!.replace(/^(name|id):/, '')) : undefined)
+      || d.specFields?.find(o => o.label === f.label);
+    if (old && old.key !== f.key && !d.facts[f.key] && d.facts[old.key]) {
+      d.facts[f.key] = d.facts[old.key];
+      if (d.detailSources?.[old.key]) (d.detailSources ||= {})[f.key] = d.detailSources[old.key];
+    }
+  }
   for (const old of d.specFields || []) if (!fields.some(f => f.key === old.key)) {
     delete d.facts[old.key]; if (d.detailSources) delete d.detailSources[old.key];
   }
+  if (d.specFields?.some(f => rawFieldLabel.test(f.label))) d.fields = [];
+  d.specSchemaVersion = specSchemaVersion;
   d.specCategory = [...d.category];
   d.specFields = fields; d.detailSources ||= {};
   // An option removed by MyMarket must not survive invisibly in a draft.
@@ -23,6 +34,7 @@ export async function fillDetails(flow: Workflow, d: Draft, fields: SpecField[],
   const original = d.ownerDescription ?? d.originalDescription ?? d.description;
   const text = [d.title, original, d.model, d.condition, ...Object.entries(itemFacts(d.facts, d.questions)).filter(([k]) => !d.detailSources?.[k] || ['owner', 'input'].includes(d.detailSources[k])).map(([, v]) => v)].join('\n');
   if (missing.length || (rewrite && d.originalDescription === undefined)) {
+    flow.store.event(d, 'Looking up specs…');
     let result: ReturnType<typeof decisionSchemas.details.parse> | undefined;
     try {
       result = decisionSchemas.details.parse(await flow.brain(decisionSchemas.details,

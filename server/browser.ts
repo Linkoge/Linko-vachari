@@ -4,7 +4,7 @@ import { config, privateDir } from './config';
 import { WorkflowError } from './types';
 import { PrivateDisplay } from './display';
 import { redactSecrets } from './secrets';
-export interface ElementInfo { group?: string; id: string; tag: string; role: string; label: string; type: string; href: string; required: boolean; options: string[]; value: string; hasValue: boolean; checked: boolean; disabled: boolean }
+export interface ElementInfo { controlId?: string; group?: string; id: string; tag: string; role: string; label: string; type: string; href: string; required: boolean; options: string[]; value: string; hasValue: boolean; checked: boolean; disabled: boolean }
 export interface Snapshot { url: string; title: string; text: string; elements: ElementInfo[]; images: { alt: string; src: string }[] }
 export function allowedUrl(url: string) {
   try { const u = new URL(url); return u.protocol === 'https:' && (['mymarket.ge', 'www.mymarket.ge', 'my.ge', 'www.my.ge'].includes(u.hostname) || isAuthHost(u.hostname)); } catch { return false; }
@@ -126,8 +126,11 @@ export class MarketplaceBrowser {
         const chosen = control?.querySelector('.sg-selectbox__single-value')?.textContent?.trim() || '';
         const group = (f.type === 'radio' || f.type === 'checkbox' || e.getAttribute('role') === 'combobox' || f.type === 'file' ? groupOf(e) : '').slice(0, 120);
         const placeholder = control?.querySelector('.sg-selectbox__placeholder')?.textContent?.trim() || '';
-        const label = (e.getAttribute('aria-label') || associated || labelledby || e.getAttribute('placeholder') || e.textContent || e.getAttribute('title') || (e.getAttribute('role') === 'combobox' ? group || placeholder : '') || e.getAttribute('name') || '').replace(/\s+/g, ' ').trim().slice(0, 220);
-        return { id, tag: e.tagName.toLowerCase(), role: e.getAttribute('role') || (e.classList.contains('fast-option') ? 'option' : ''), label, type: f.type || '', href: e instanceof HTMLAnchorElement ? e.href : '', group, required: f.required || e.getAttribute('aria-required') === 'true' || /\*/.test(associated) || /\*/.test(group + placeholder), options: e instanceof HTMLSelectElement ? Array.from(e.options).filter(o => !o.disabled && o.value).map(o => o.text) : [], value: f.type === 'password' || /phone|mobile|email|მობილურ|ტელეფონ|ელ.?ფოსტ/i.test(label) ? '' : (e instanceof HTMLSelectElement ? (f.value ? e.selectedOptions[0]?.text || '' : '') : f.value || chosen || '').slice(0, 6000), hasValue: ['radio', 'checkbox'].includes(f.type) ? isOn : !!f.value || !!chosen, checked: isOn || e.getAttribute('aria-selected') === 'true', disabled: f.disabled || e.getAttribute('aria-disabled') === 'true' };
+        const fieldControl = e.matches('input,textarea,select,[role=combobox]');
+        const nearby = fieldControl ? groupOf(e) : '';
+        const label = (associated || labelledby || e.getAttribute('aria-label') || group || nearby || e.getAttribute('placeholder') || placeholder || (!fieldControl ? e.textContent : '') || e.getAttribute('title') || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+        const controlId = e.getAttribute('name') ? 'name:' + e.getAttribute('name') : e.id ? 'id:' + e.id : undefined;
+        return { controlId, id, tag: e.tagName.toLowerCase(), role: e.getAttribute('role') || (e.classList.contains('fast-option') ? 'option' : ''), label, type: f.type || '', href: e instanceof HTMLAnchorElement ? e.href : '', group, required: f.required || e.getAttribute('aria-required') === 'true' || /\*/.test(associated) || /\*/.test(label + group + placeholder), options: e instanceof HTMLSelectElement ? Array.from(e.options).filter(o => !o.disabled && o.value).map(o => o.text) : [], value: f.type === 'password' || /phone|mobile|email|მობილურ|ტელეფონ|ელ.?ფოსტ/i.test(label) ? '' : (e instanceof HTMLSelectElement ? (f.value ? e.selectedOptions[0]?.text || '' : '') : f.value || chosen || '').slice(0, 6000), hasValue: ['radio', 'checkbox'].includes(f.type) ? isOn : !!f.value || !!chosen, checked: isOn || e.getAttribute('aria-selected') === 'true', disabled: f.disabled || e.getAttribute('aria-disabled') === 'true' };
       });
       return { url: location.href, title: document.title, text: document.body.innerText.slice(0, 22_000), elements, images: Array.from(document.images).filter(e => !!e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden').slice(0, 80).map(i => ({ alt: i.alt, src: /^(blob:|data:)/.test(i.src) ? '[local preview]' : i.src.split('?')[0] })) };
     });

@@ -30,7 +30,7 @@ export function MyListings({ online, onOpen }: { online: boolean; onOpen: (id: s
     {!listings ? <p role="status">{online ? 'Loading…' : 'Connect to load listings.'}</p> : !listings.length && <p>No listings yet.</p>}
     {listings?.map(l => <article key={l.id} aria-label={l.title} className="listing-row">
       {l.cover ? <img className="listing-cover" src={l.cover} alt={`Cover of ${l.title}`}/> : <div className="listing-cover" aria-label="No cover photo"/>}
-      <div className="listing-info"><h2>{l.title}</h2><p>{l.price} {l.currency}</p><p>{l.account}</p><span className="listing-status">{l.status === 'needs_input' ? 'Needs info' : l.status}</span>{l.reason && <p>{l.reason}</p>}</div>
+      <div className="listing-info"><h2>{l.title}</h2><p>{l.price} {l.currency}</p><p>{l.account}</p><span className="listing-status">{l.status === 'needs_input' ? 'Needs info' : l.status}</span>{l.progress && <p className="listing-progress" role="status">{l.progress}</p>}{l.reason && <p>{l.reason}</p>}</div>
       <div className="listing-actions">{l.url ? <a href={l.url} target="_blank" rel="noreferrer">MyMarket</a> : <span aria-disabled="true">MyMarket</span>}
         {l.draftId && <a href={'#draft/' + l.draftId} onClick={e => { e.preventDefault(); if (online) onOpen(l.draftId!); }} aria-disabled={!online}>Open draft</a>}
         <button className="text-button" disabled={!online || pending || !l.canDelete} onClick={() => { setError(''); setDeleting(l); }}>Delete</button></div>

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -9,7 +9,7 @@ import { Workflow } from '../server/workflow';
 import { CredentialVault } from '../server/credentials';
 import { SettingsStore } from '../server/settings';
 import { fillDetails } from '../server/details';
-import { SpecCache, snapshotFields } from '../server/specs';
+import { SpecCache, snapshotFields, matchingControls, specSchemaVersion } from '../server/specs';
 import { decisionSchemas, estimateSchema } from '../server/decision-schemas';
 import { codexArgs, claudeArgs, ask } from '../server/codex';
 import { createApp } from '../server/app';
@@ -239,4 +239,104 @@ test('numeric spec estimates cannot return units or commentary that the live num
   const schema = estimateSchema([{ key: 'Megapixels', label: 'Megapixels', required: true, options: [], kind: 'spec', inputType: 'number' }]);
   assert.equal(schema.safeParse({ values: { Megapixels: '24.2' } }).success, true);
   assert.equal(schema.safeParse({ values: { Megapixels: '24.2 MP' } }).success, false);
+});
+
+
+test('visible associated labels replace raw ids and non-spec Nikon controls are excluded', async () => {
+  const f = fixture(), browser = await chromium.launch(), page = await browser.newPage();
+  try {
+    await page.setContent(`<div><label for="mp">Resolution</label><input id="mp" name="Attr-text-47" value="24.2 MP"></div>
+      <div><span id="sensor-title">Sensor format</span><input aria-labelledby="sensor-title" name="Attr-text-48" value="DX"></div>
+      <div><h3>Lens</h3><div><input name="Attr-text-49" value="18-55mm"></div></div>
+      <div><input name="Attr-text-50" placeholder="Mount"></div>
+      <div><label>Product name<input name="Title_4" value="Nikon D3400"></label></div>
+      <div><label>Seller<input name="User" value="ფოტოკამერა"></label></div>
+      <div><label>Kind<input name="0" value="ციფრული სარკიანი ფოტოკამერა"></label></div>
+      <div><label>Clip<input name="VideoURL"></label></div>
+      <div><input name="Attr-text-999"></div><div><input></div>
+      <label>Description<textarea></textarea></label><label>Price<input></label><label>Phone<input></label><label>City<input></label>`);
+    const snapshot = await f.flow.browser.snapshot(page), fields = snapshotFields(snapshot);
+    assert.deepEqual(fields.map(f => f.label), ['Resolution', 'Sensor format', 'Lens', 'Mount']);
+    assert.deepEqual(fields.map(f => f.controlId), ['name:Attr-text-47', 'name:Attr-text-48', 'name:Attr-text-49', 'name:Attr-text-50']);
+    assert.equal(snapshot.elements.find(e => e.controlId === 'name:Attr-text-999')?.label, '');
+  } finally { await browser.close(); f.close(); }
+});
+
+test('detail filling uses a stable identifier before a duplicate or changed label, with label fallback', async () => {
+  const f = fixture(), browser = await chromium.launch(), page = await browser.newPage();
+  try {
+    await page.setContent('<label>Resolution<input name="other"></label><label>Megapixels<input name="Attr-text-47"></label>');
+    const field = { key: 'Resolution', label: 'Resolution', required: false, options: [], kind: 'spec' as const, controlId: 'name:Attr-text-47' };
+    f.draft.specFields = [field]; f.draft.facts.Resolution = '24.2 MP';
+    const snapshot = await f.flow.browser.snapshot(page);
+    assert.equal(matchingControls(field, snapshot)[0].label, 'Megapixels');
+    assert.equal(await f.flow.fillSavedDetails(page, snapshot, f.draft), 'filled');
+    assert.equal(await page.locator('[name="Attr-text-47"]').inputValue(), '24.2 MP');
+    assert.equal(await page.locator('[name="other"]').inputValue(), '');
+    f.draft.facts.Resolution = '25 MP';
+    await f.flow.step(page, snapshot, { action: 'fill', target: snapshot.elements.find(e => e.controlId === 'name:other')!.id, source: 'facts.Resolution', value: '25 MP', questions: [], reason: '' }, f.draft, 'prepare', '');
+    assert.equal(await page.locator('[name="Attr-text-47"]').inputValue(), '25 MP');
+    assert.equal(await page.locator('[name="other"]').inputValue(), '');
+    assert.equal(matchingControls({ ...field, controlId: 'name:removed' }, snapshot)[0].controlId, 'name:other');
+  } finally { await browser.close(); f.close(); }
+});
+
+for (const required of [false, true]) test(`unmatched ${required ? 'required detail asks inline by visible label' : 'optional detail is skipped with a short note'}`, async () => {
+  const f = fixture(), browser = await chromium.launch(), page = await browser.newPage();
+  try {
+    f.flow.browser.page = page;
+    await page.setContent('<button>Publish listing</button>');
+    const field = { ...camera, required, controlId: 'name:removed' };
+    f.draft.specFields = [field]; f.draft.facts[field.key] = 'DSLR';
+    await f.flow.fillSavedDetails(page, await f.flow.browser.snapshot(page), f.draft);
+    if (required) {
+      assert.equal(f.draft.state, 'needs_input'); assert.equal(f.draft.questions[0].label, 'Camera type');
+      assert.match(f.draft.message, /Camera type/);
+    } else {
+      assert.deepEqual(f.draft.questions, []); assert.match(f.draft.message, /Skipped optional detail: Camera type/);
+    }
+    f.flow.brain = (async () => ({ description: '', answers: [] })) as typeof ask;
+    await f.flow.reconcileDetails(f.draft, [field]);
+    assert.equal(f.draft.questions.length, required ? 1 : 0);
+  } finally { await browser.close(); f.close(); }
+});
+
+test('old category schemas are invalidated and Nikon cached answers migrate on prepare without retyping or submission', async () => {
+  const f = fixture(), browser = await chromium.launch(), page = await browser.newPage();
+  try {
+    f.flow.browser.page = page; f.flow.useAccount = async () => {};
+    const bad = { key: 'Attr-text-47', label: 'Attr-text-47', required: false, options: [], kind: 'spec' as const };
+    const unavailable = { ...bad, key: 'Battery cycles', label: 'Battery cycles' };
+    const extras = ['Title_4', 'User', '0', 'VideoURL'].map(key => ({ ...bad, key, label: key }));
+    Object.assign(f.draft, { state: 'blocked', specFields: [bad, unavailable, ...extras], facts: { 'Battery cycles': '1000', 'Attr-text-47': '24.2 MP', Title_4: 'Nikon D3400', User: 'ფოტოკამერა', '0': 'ციფრული სარკიანი ფოტოკამერა', VideoURL: '' } });
+    writeFileSync(f.flow.specCache.file, JSON.stringify({ [JSON.stringify(f.draft.category)]: { at: Date.now(), fields: [bad] } }));
+    assert.equal(new SpecCache(f.flow.specCache.file).get(f.draft.category), undefined);
+    let submitted = 0;
+    f.flow.auth.ensureSignedIn = async () => { await page.setContent('<label>Resolution<input name="Attr-text-47"></label><button onclick="window.submitted()">Publish listing</button>'); return true; };
+    f.flow.brain = (async (schema: unknown) => {
+      if (schema === decisionSchemas.details) return { description: '', answers: [] };
+      if (schema === decisionSchemas.audit) return { categoryMatches: true, fieldsMatch: true, photosPresent: true, questions: [], fields: [{ label: 'Resolution', value: '24.2 MP', source: 'facts.Resolution' }] };
+      return { action: 'done', questions: [] };
+    }) as typeof ask;
+    // Fixture upload marks the agent result; no final marketplace action is executed.
+    const agent = f.flow.agent.bind(f.flow);
+    f.flow.agent = async (...args) => { const result = await agent(...args); return result && { ...result, uploaded: true }; };
+    await page.exposeFunction('submitted', () => { submitted++; });
+    await f.flow.prepareAI(f.draft);
+    assert.equal(f.draft.state, 'ready'); assert.equal(submitted, 0);
+    assert.equal(await page.getByLabel('Resolution').inputValue(), '24.2 MP');
+    assert.deepEqual(f.draft.facts, { Resolution: '24.2 MP' });
+    assert.equal(f.draft.specSchemaVersion, specSchemaVersion);
+    assert.equal(new SpecCache(f.flow.specCache.file).get(f.draft.category)?.[0].label, 'Resolution');
+    assert.ok(f.draft.events.some(e => /Reading category fields/.test(e.message)));
+    assert.equal(f.draft.title, 'Nikon D3400');
+    assert.ok(f.draft.events.some(e => e.message === 'Skipped optional detail: Battery cycles.'));
+    // Exercise the durable Publish retry through its guarded prepare path, replacing only final submission.
+    f.flow.accounts.use = () => {};
+    const settings = f.flow.settings.load(); settings.automation.publish = true; f.flow.settings.save(settings);
+    f.flow.publish = async d => { assert.equal(d.state, 'ready'); submitted++; d.state = 'published'; };
+    f.store.save(f.draft);
+    await f.flow.run(f.draft.id, 'submit');
+    assert.equal(submitted, 1); assert.equal(f.store.get(f.draft.id).state, 'published');
+  } finally { await browser.close(); f.close(); }
 });

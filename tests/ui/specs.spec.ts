@@ -61,14 +61,73 @@ test('estimated values have a distinct editable marker and only unknown required
     await r.fulfill({ response, json: { ...saved, estimateMissing: true, specFields: [
       { key: 'Wheel diameter', label: 'Wheel diameter', required: true, kind: 'spec', options: ['64 mm', '72 mm', '80 mm'] },
       { key: 'Included', label: 'Included accessories', required: true, kind: 'owner', options: [] },
+      { key: 'Attr-text-47', label: 'Attr-text-47', required: false, kind: 'spec', options: [] },
     ], facts: { 'Wheel diameter': '72 mm' }, detailSources: { 'Wheel diameter': 'estimated' } } });
   });
   await page.goto('/#draft/' + draft.id);
   await expect(page.getByLabel('Wheel diameter', { exact: true })).toHaveValue('72 mm');
   await expect(page.getByText('estimated', { exact: true })).toBeVisible();
+  await expect(page.getByText('Attr-text-47', { exact: true })).toHaveCount(0);
   await expect(page.locator('.missing-detail')).toHaveCount(1);
   await expect(page.locator('.missing-detail')).toContainText('Included accessories');
   await page.screenshot({ path: info.outputPath('estimated-details-desktop.png'), fullPage: true });
   await page.getByLabel('Wheel diameter', { exact: true }).selectOption('80 mm');
   await expect(page.getByText('estimated', { exact: true })).toHaveCount(0);
+});
+
+
+test('background jobs refresh an already open idle draft with progress and results; polling protects unsaved edits', async ({ page }) => {
+  const draft = await (await page.request.post('/api/drafts', { headers: { 'X-Linko-Request': '1' }, data: {} })).json();
+  const path = '/api/drafts/' + draft.id;
+  let phase = 'idle';
+  await page.route('**' + path, async r => {
+    const response = await r.fetch(), saved = await response.json();
+    if (r.request().method() === 'GET' && phase !== 'idle') {
+      await r.fulfill({ response, json: { ...saved, state: phase === 'finished' ? 'review' : 'preparing', message: phase === 'reading' ? 'Reading category fields…' : 'Looking up specs…', specFields: [{ key: 'Sensor', label: 'Sensor format', required: false, options: [], kind: 'spec' }], facts: { Sensor: phase === 'finished' ? 'DX' : '' } } });
+    } else await r.fulfill({ response });
+  });
+  await page.goto('/#draft/' + draft.id);
+  await expect(page.getByLabel('Listing title')).toBeEnabled();
+  phase = 'reading'; await expect(page.getByRole('status')).toHaveText('Reading category fields…');
+  phase = 'lookup'; await expect(page.getByRole('status')).toHaveText('Looking up specs…');
+  phase = 'finished'; await expect(page.getByLabel('Sensor format', { exact: true })).toHaveValue('DX');
+  await expect(page.getByLabel('Listing title')).toBeEnabled();
+  // Hold a save while the poll has an older server title available.
+  let release!: () => void;
+  const hold = new Promise<void>(r => { release = r; });
+  await page.route('**' + path, async r => {
+    if (r.request().method() === 'PATCH') { await hold; await r.continue(); }
+    else await r.fallback();
+  });
+  await page.getByLabel('Listing title').fill('Owner edit while polling');
+  await expect(page.getByRole('button', { name: 'Save draft', exact: true })).toContainText('Saving…');
+  await page.waitForTimeout(1200);
+  await expect(page.getByLabel('Listing title')).toHaveValue('Owner edit while polling');
+  release();
+  await expect(page.getByRole('button', { name: 'Save draft', exact: true })).toContainText('Saved');
+});
+
+test('Save draft explicitly persists text with saving state, and draft rows and Open both resume the editor', async ({ page }) => {
+  await page.goto('/');
+  const title = page.getByLabel('Listing title');
+  await expect(title).toBeEnabled();
+  const id = await page.evaluate(() => sessionStorage.getItem('linko-draft'));
+  let release!: () => void;
+  const hold = new Promise<void>(r => { release = r; });
+  await page.route('**/api/drafts/' + id, async r => {
+    if (r.request().method() === 'PATCH') { await hold; await r.continue(); }
+    else await r.continue();
+  });
+  await title.fill('Saved camera');
+  const save = page.getByRole('button', { name: 'Save draft', exact: true });
+  await save.click(); await expect(save).toContainText('Saving…'); await expect(save).toBeDisabled();
+  release(); await expect(save).toContainText('Saved'); await expect(save).toBeEnabled();
+  expect((await (await page.request.get('/api/drafts/' + id)).json()).title).toBe('Saved camera');
+  await page.getByRole('button', { name: 'Drafts', exact: true }).click();
+  await page.getByRole('article', { name: 'Saved camera', exact: true }).getByText('Saved camera', { exact: true }).click();
+  await expect(title).toHaveValue('Saved camera');
+  expect(await page.evaluate(() => sessionStorage.getItem('linko-draft'))).toBe(id);
+  await page.getByRole('button', { name: 'Drafts', exact: true }).click();
+  await page.getByRole('button', { name: 'Open Saved camera', exact: true }).click();
+  await expect(title).toHaveValue('Saved camera');
 });

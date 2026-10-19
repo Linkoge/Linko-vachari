@@ -1,12 +1,13 @@
+export const rawFieldLabel = /^(?:Attr[-_]|Title[_-]?\d|VideoURL$|User$|\d+$)/i;
 export type State = 'draft' | 'queued' | 'analyzing' | 'needs_input' | 'review' | 'preparing' | 'ready' | 'publishing' | 'published' | 'unknown' | 'blocked';
 export interface Photo { id: string; width: number; height: number }
 export interface Comparable { url: string; title: string; breadcrumbs: string[] }
 export interface Question { key: string; label: string; options: string[] }
-export interface SpecField extends Question { inputType?: 'number'; required: boolean; kind: 'spec' | 'owner' }
+export interface SpecField extends Question { controlId?: string; inputType?: 'number'; required: boolean; kind: 'spec' | 'owner' }
 export type DetailSource = 'owner' | 'input' | 'lookup' | 'estimated';
 export interface FieldReview { label: string; value: string; source: string }
 export interface Draft {
-  specCategory?: string[]; specFields?: SpecField[]; detailSources?: Record<string, DetailSource>; estimateMissing?: boolean;
+  specSchemaVersion?: number; specCategory?: string[]; specFields?: SpecField[]; detailSources?: Record<string, DetailSource>; estimateMissing?: boolean;
   ownerDescription?: string; originalDescription?: string; descriptionRewritten?: boolean;
   accountId?: string; categoryMethod?: 'tree' | 'comparable-search' | 'owner'; categoryCandidates?: string[][];
   id: string; revision: number; state: State; title: string; description: string;

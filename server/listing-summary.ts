@@ -7,7 +7,7 @@ import { redact } from './browser';
 export interface ListingSummary {
   id: string; title: string; price: string; currency: string; account: string;
   status: 'queued' | 'publishing' | 'live' | 'failed' | 'needs_input' | 'deleted-by-me' | 'relisted';
-  reason?: string; draftId?: string;
+  progress?: string; reason?: string; draftId?: string;
   cover?: string; url?: string; canDelete: boolean;
 }
 
@@ -36,6 +36,7 @@ export function myListings(flow: Workflow, queue: PublishQueue): ListingSummary[
     const photo = recipe.photos.find(p => p.id === recipe.coverId) || recipe.photos[0];
     return { id: d.id, title: recipe.title || 'Untitled', price: recipe.price, currency: recipe.currency,
       account: flow.accounts.label(recipe.accountId || 'legacy'), status,
+      progress: status === 'publishing' ? redact(d.message).slice(0, 160) : status === 'queued' ? 'Waiting to publish…' : undefined,
       reason: reason ? redact(reason).slice(0, 240) : undefined,
       draftId: status === 'needs_input' || (status === 'failed' && !record && !['unknown', 'publishing', 'published'].includes(d.state)) ? d.id : undefined,
       cover: photo ? record ? `/api/listings/${d.id}/cover` : `/api/drafts/${d.id}/photos/${photo.id}` : undefined,

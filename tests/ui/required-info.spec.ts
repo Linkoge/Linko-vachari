@@ -64,6 +64,8 @@ test('Needs info links to inline questions, saves account answers and publishes 
   await page.screenshot({ path: info.outputPath('inline-required-info.png'), fullPage: true });
   await page.getByRole('button', { name: 'Publish', exact: true }).click();
   await expect.poll(() => publishes).toBe(1);
+  await expect(page.getByRole('heading', { name: 'My listings', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'New listing', exact: true }).click();
   await expect(page.getByLabel('Listing title')).toHaveValue('');
   await expect(page.getByLabel('City', { exact: true })).toHaveValue('ბათუმი');
 });
