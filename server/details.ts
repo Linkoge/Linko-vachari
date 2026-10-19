@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { decisionSchemas, estimateSchema } from './decision-schemas';
 import { privateDir } from './config';
 import { itemFacts } from './required-info';
+import { applyCondition } from './condition';
 import { ownerDetail, specSchemaVersion, rawFieldLabel } from './specs';
 import type { Draft, SpecField } from './types';
 import type { Workflow } from './workflow';
@@ -30,11 +31,12 @@ export async function fillDetails(flow: Workflow, d: Draft, fields: SpecField[],
   for (const f of fields) if (d.facts[f.key] && f.options.length && !f.options.includes(d.facts[f.key])) {
     delete d.facts[f.key]; delete d.detailSources[f.key];
   }
+  applyCondition(d, fields); // The owner's New/Used choice is the condition answer; it is never looked up or estimated.
   const missing = fields.filter(f => !d.facts[f.key]?.trim());
   const original = d.ownerDescription ?? d.originalDescription ?? d.description;
   const text = [d.title, original, d.model, d.condition, ...Object.entries(itemFacts(d.facts, d.questions)).filter(([k]) => !d.detailSources?.[k] || ['owner', 'input'].includes(d.detailSources[k])).map(([, v]) => v)].join('\n');
   if (missing.length || (rewrite && d.originalDescription === undefined)) {
-    flow.store.event(d, 'Looking up specs…');
+    flow.store.event(d, 'Looking up specs…'); flow.progress(d, 'Looking up specs…');
     let result: ReturnType<typeof decisionSchemas.details.parse> | undefined;
     try {
       result = decisionSchemas.details.parse(await flow.brain(decisionSchemas.details,

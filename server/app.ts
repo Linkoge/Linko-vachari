@@ -15,6 +15,7 @@ import { providerStatus } from './codex';
 import { providerModels, validateModelChanges } from './ai-models';
 import { addAccountSchema } from './accounts';
 import { accountField, itemFacts } from './required-info';
+import { applyCondition, conditionChoice } from './condition';
 import { aiSchema, automationSchema } from './settings';
 import { myListings } from './listing-summary';
 import { PublishQueue } from './queue';
@@ -127,7 +128,12 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     const r = workflow.archive.get(req.params.id);
     res.type('text/markdown').attachment(r.id + '.md').sendFile(r.id + '.md', { root: store.archiveDir });
   });
-  app.get('/api/drafts/:id', (req, res) => res.json(store.get(req.params.id)));
+  app.get('/api/drafts/:id', (req, res) => {
+    const d = store.get(req.params.id);
+    // Phone/city the account defaults already answer are not open questions, even on drafts saved before this rule.
+    try { d.questions = workflow.openQuestions(d); } catch { /* removed account: keep the saved questions */ }
+    res.json(d);
+  });
   const editable = (id: string) => {
     const d = store.get(id);
     if (workflow.archive.all().some(r => r.id === id && r.deleteRequestedAt)) throw new WorkflowError('LOCKED', 'This listing was deleted by you.');
@@ -170,9 +176,11 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
       if (value !== d.facts[f.key]) { d.detailSources ||= {}; d.detailSources[f.key] = 'owner'; }
     }
     if (patch.estimateMissing !== undefined && patch.estimateMissing !== d.estimateMissing) store.saveEstimateDefault(patch.estimateMissing);
+    if (patch.condition !== d.condition && conditionChoice(patch.condition)) store.saveConditionDefault(conditionChoice(patch.condition)!);
     if (d.descriptionRewritten && patch.description === d.originalDescription) d.descriptionRewritten = false;
     if (patch.description !== d.description) d.ownerDescription = patch.description;
-    Object.assign(d, values); if (!d.relistOf) d.fields = []; d.revision++; d.state = d.category.length ? 'review' : 'draft'; delete d.preparedRevision;
+    Object.assign(d, values); applyCondition(d); if (!d.relistOf) d.fields = []; d.revision++; d.state = d.category.length ? 'review' : 'draft'; delete d.preparedRevision;
+    d.questions = workflow.openQuestions(d);
     if (d.questions.some(q => accountField(q) === 'location' ? !d.location.trim() : accountField(q) === 'phone' ? !d.facts.phone && !workflow.accounts.defaults(d.accountId || 'legacy').phone : !d.facts[q.key]?.trim())) d.state = 'needs_input';
     invalidate(d.id); store.save(d); res.json(d);
   });
@@ -215,8 +223,15 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     const operation = req.params.operation;
     if (!['analyze', 'details', 'prepare', 'publish'].includes(operation)) return res.status(404).json({ message: 'Unknown action.' });
     const d = store.get(req.params.id);
-    if (queue.active(d.id)) throw new WorkflowError('LOCKED', 'This draft already has a queued job.');
     workflow.accounts.require(d.accountId || 'legacy');
+    // Publish is never rejected for queued work: it joins the running job or repeats harmlessly.
+    if (queue.active(d.id) && operation !== 'prepare') {
+      if (operation !== 'publish') return res.status(202).json({ accepted: true, job: queue.activeJob(d.id) });
+      if (!workflow.settings.load().automation.publish) throw new WorkflowError('DISABLED', 'Publishing is disabled in Settings.');
+      const { job, repeated } = queue.requestPublish(d.id);
+      return res.status(202).json({ accepted: true, job, repeated, ...(repeated ? {} : { nextDraft: newDraft(d.accountId) }) });
+    }
+    if (queue.active(d.id)) throw new WorkflowError('LOCKED', 'This draft already has a queued job.');
     if (['published', 'unknown', 'publishing'].includes(d.state)) throw new WorkflowError('LOCKED', 'This item already has a publishing attempt. Check your MyMarket account.');
     if (!d.photos.length || !d.photos.some(p => p.id === d.coverId) || !d.description.trim() || !(Number(d.price) > 0)) throw new WorkflowError('INPUT', 'Add photos, choose a main photo, and provide a description and a price above zero.');
     if (req.body.revision !== d.revision) throw new WorkflowError('CONFLICT', 'Your draft changed. Save the latest details first.');
@@ -224,7 +239,7 @@ export function createApp(store = new Store(), workflow = new Workflow(store), a
     if (operation === 'publish') {
       if (!workflow.settings.load().automation.publish) throw new WorkflowError('DISABLED', 'Publishing is disabled in Settings.');
       if (!d.title.trim()) throw new WorkflowError('INPUT', 'Add a title.');
-      const job = queue.enqueue(d.id, 'submit');
+      const { job } = queue.requestPublish(d.id);
       // Persist the next independent draft before responding; the editor can reset in one round trip.
       const nextDraft = newDraft(d.accountId);
       res.status(202).json({ accepted: true, job, nextDraft });

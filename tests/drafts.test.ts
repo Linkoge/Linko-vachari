@@ -69,7 +69,9 @@ test('Publish accepts immediately when browser busy, resets to a fresh draft, se
       assert.notEqual(data.nextDraft.id, d.id); assert.equal(data.nextDraft.title, ''); assert.deepEqual(data.nextDraft.photos, []); assert.equal(data.nextDraft.accountId, d.accountId);
       assert.equal(f.store.get(d.id).state, 'queued');
     }
-    assert.equal((await fetch(`${base}/drafts/${a.id}/publish`, { method: 'POST', headers, body: JSON.stringify({ revision: a.revision }) })).status, 409);
+    // A repeated Publish is accepted and idempotent (no second job), never rejected as already queued.
+    const repeat = await fetch(`${base}/drafts/${a.id}/publish`, { method: 'POST', headers, body: JSON.stringify({ revision: a.revision }) });
+    assert.equal(repeat.status, 202); assert.equal((await repeat.json() as any).repeated, true); assert.equal(f.queue.all().length, 3);
     assert.equal((await fetch(`${base}/drafts/${a.id}`, { method: 'PATCH', headers, body: JSON.stringify(patch(a)) })).status, 409);
     assert.equal((await fetch(`${base}/drafts/${a.id}?revision=0`, { method: 'DELETE', headers })).status, 409);
     let active = 0, peak = 0; const order: string[] = [];

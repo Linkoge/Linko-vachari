@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { ElementInfo, Snapshot } from './browser';
 import { rawFieldLabel, type SpecField } from './types';
 export { rawFieldLabel } from './types';
-import { accountField } from './required-info';
+import { controlField } from './required-info';
 
 // These are listing/account/transaction facts, never product-specification guesses.
 export const ownerDetail = /condition|defect|damage|accessor|includ|warranty|price|currency|location|city|country|address|phone|mobile|contact|delivery|payment|promotion|vip|boost|მდგომარეობ|დეფექტ|დაზიან|კომპლექტ|მოყვება|აქსესუარ|გარანტ|ფასი|ვალუტ|მდებარეობ|ქალაქ|ქვეყან|მისამართ|ტელეფონ|მობილურ|მიტანა|გადახდა|состояни|дефект|поврежд|комплект|аксессуар|гарант|цен[аы]|город|телефон/i;
@@ -24,7 +24,7 @@ export function snapshotFields(snapshot: Snapshot): SpecField[] {
   for (const e of snapshot.elements) {
     if (e.disabled || (!['input', 'select', 'textarea'].includes(e.tag) && e.role !== 'combobox') || ['file','hidden','password','submit','button','search','email'].includes(e.type)) continue;
     const label = (e.group || e.label).trim();
-    if (!label || rawFieldLabel.test(label) || nonSpecControl.test((e.controlId || '').replace(/^(name|id):/, '')) || /video.?url|ვიდეო|видео/i.test(label) || coreField.test(label) || accountField({ key: '', label }) || transactional.test(label)) continue;
+    if (!label || rawFieldLabel.test(label) || nonSpecControl.test((e.controlId || '').replace(/^(name|id):/, '')) || /video.?url|ვიდეო|видео/i.test(label) || coreField.test(label) || controlField({ label, controlId: e.controlId, type: e.type }) || transactional.test(label)) continue;
     if (e.type === 'checkbox' && !e.required) continue;
     const options = e.type === 'radio' ? snapshot.elements.filter(r => r.type === 'radio' && r.group === e.group).map(r => r.label) : e.options;
     if (fields.some(f => f.label === label)) continue;

@@ -10,7 +10,32 @@ export class PublishQueue {
   constructor(public workflow: Workflow) {}
   get store() { return this.workflow.store; }
   all(): Job[] { return this.store.db.prepare('SELECT * FROM jobs ORDER BY createdAt, rowid').all() as unknown as Job[]; }
-  active(id: string) { return this.all().some(j => j.draft === id && ['queued', 'running'].includes(j.status)); }
+  activeJob(id: string) { return this.all().find(j => j.draft === id && ['queued', 'running'].includes(j.status)); }
+  active(id: string) { return !!this.activeJob(id); }
+  /** Publish was pressed while a category/details job was running; it continues in that job's sequence. */
+  publishAfter(id: string) { return !!this.store.db.prepare('SELECT 1 FROM publish_after WHERE draft=?').get(id); }
+  /**
+   * Publish is always accepted. With no job it queues one; during a category/details job it is attached to it
+   * (a queued job becomes the publish job, a running one continues into it); a repeated press changes nothing.
+   */
+  requestPublish(id: string): { job: Job; attached: boolean; repeated: boolean } {
+    const job = this.activeJob(id);
+    if (!job) return { job: this.enqueue(id, 'submit'), attached: false, repeated: false };
+    if (job.operation === 'submit' || this.publishAfter(id)) return { job, attached: false, repeated: true };
+    if (job.status === 'running') {
+      // The running job owns the draft; only a durable marker is written, which the job reads when its current step ends.
+      this.store.db.prepare('INSERT OR IGNORE INTO publish_after VALUES (?)').run(id);
+      return { job, attached: true, repeated: false };
+    }
+    const d = this.store.get(id);
+    this.store.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.store.db.prepare("UPDATE jobs SET operation='submit' WHERE id=?").run(job.id); job.operation = 'submit';
+      this.store.event(d, 'Publish queued.');
+      this.store.db.exec('COMMIT');
+    } catch (e) { this.store.db.exec('ROLLBACK'); throw e; }
+    return { job, attached: true, repeated: false };
+  }
   cancel(id: string) {
     const job = this.all().find(j => j.draft === id && j.operation === 'submit' && j.status === 'queued');
     if (!job) throw new WorkflowError('LOCKED', 'This listing has already started publishing.');
@@ -45,7 +70,10 @@ export class PublishQueue {
       this.workflow.telegram.notify(`Attention: ${d.title || 'Listing'} job was interrupted. ${d.message}`);
     }
   }
-  private finish(job: Job, status: string) { this.store.db.prepare('UPDATE jobs SET status=? WHERE id=?').run(status, job.id); }
+  private finish(job: Job, status: string) {
+    this.store.db.prepare('UPDATE jobs SET status=? WHERE id=?').run(status, job.id);
+    if (!['queued', 'running'].includes(status)) this.store.db.prepare('DELETE FROM publish_after WHERE draft=?').run(job.draft);
+  }
   start() { this.timer = setInterval(() => { void this.drain(); }, 500); this.timer.unref(); }
   stop() { if (this.timer) clearInterval(this.timer); }
   async drain() {
@@ -54,7 +82,12 @@ export class PublishQueue {
     this.draining = true; this.finish(job, 'running');
     try {
       await this.workflow.run(job.draft, job.operation);
-      const d = this.store.get(job.draft);
+      let d = this.store.get(job.draft);
+      // Publish pressed during a category/details job runs next, still inside the same job.
+      if (job.operation !== 'submit' && this.publishAfter(job.draft) && d.state !== 'blocked' && d.category.length) {
+        d.state = 'queued'; d.step = 'Publishing…'; this.store.save(d);
+        await this.workflow.run(job.draft, 'submit'); d = this.store.get(job.draft);
+      }
       this.finish(job, d.state === 'blocked' ? 'failed' : d.state);
     } catch {
       const d = this.store.get(job.draft);
